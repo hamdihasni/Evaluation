@@ -1,0 +1,22 @@
+{
+  "name": "dossier-evaluation-5eme",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cahier d'évaluation 5ème année - Circonscription Thala (français)",
+  "scripts": {
+    "build:cloud": "esbuild cloud-src/cloud.js --bundle --format=esm --minify --outfile=www/cloud.js",
+    "android:add": "cap add android",
+    "android:sync": "npm run build:cloud && cap sync android",
+    "serve": "python3 -m http.server 8080 -d www"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/core": "^6.2.0",
+    "firebase": "^10.14.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "esbuild": "^0.24.0"
+  }
+}
