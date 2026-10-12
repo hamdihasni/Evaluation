@@ -292,12 +292,13 @@ function render(keepScroll) {
   let body;
   if (view.sec === 'home') {
     body = `<div class="home">${HOME_ORDER.map(k => `<button class="tile" data-go="${k}"><span>${SECTIONS[k].icon}</span>${esc(SECTIONS[k].title)}<small>${esc(SECTIONS[k].sub)}</small></button>`).join('')}</div>
+      <button class="btn sec" data-act="printall" style="width:100%;margin-top:14px">🖨️ Imprimer tout le dossier</button>
       <p class="hint" style="text-align:center;margin-top:18px">Circonscription ${esc(S.meta.circ)} pour la langue française</p>`;
   } else {
     if (view.tab >= sec.tabs.length) view.tab = 0;
     body = (sec.tabs.length > 1 ? `<div class="tabs">${sec.tabs.map((t, i) => `<button data-tab="${i}" class="${i === view.tab ? 'on' : ''}">${t[0]}</button>`).join('')}</div>` : '') + sec.tabs[view.tab][1]();
   }
-  $('#app').innerHTML = `<header>${view.sec !== 'home' ? '<button data-act="home" aria-label="Accueil">←</button>' : ''}<h1>${esc(title)}</h1>${chip()}<button data-act="acct" aria-label="Compte">${user ? '👤' : '☁️'}</button></header><main>${body}</main>`;
+  $('#app').innerHTML = `<header>${view.sec !== 'home' ? '<button data-act="home" aria-label="Accueil">←</button>' : ''}<h1>${esc(title)}</h1>${chip()}<button data-act="printall" aria-label="Imprimer tout le dossier">🖨️</button><button data-act="acct" aria-label="Compte">${user ? '👤' : '☁️'}</button></header><main>${body}</main>`;
   refresh();
   window.scrollTo(0, y);
 }
@@ -397,6 +398,7 @@ document.addEventListener('click', async e => {
   const a = el.dataset.act;
   if (a === 'home') return go('home');
   if (a === 'acct') return authModal();
+  if (a === 'printall') return printAll();
   if (a === 'closemodal') return modal('');
   if (a === 'skip') { skipAuth = true; localStorage.setItem('dossier5.skip', '1'); return modal(''); }
   if (a === 'login' || a === 'register' || a === 'resetpw') return authDo(a);
@@ -434,6 +436,60 @@ try {
     if (view.sec !== 'home') go('home'); else App.exitApp();
   });
 } catch (e) { /* navigateur */ }
+
+/* =====================================================================
+   10 bis. IMPRESSION DE TOUT LE DOSSIER
+   Construit une version statique de toutes les sections (tous les onglets),
+   puis lance l'impression. L'affichage écran n'est pas modifié.
+   ===================================================================== */
+function buildPrint() {
+  const wrap = document.createElement('div');
+  const meta = [S.meta.ecole, S.meta.classe, S.meta.annee, S.meta.enseignant].filter(Boolean).map(esc).join(' · ');
+  wrap.innerHTML = HOME_ORDER.map(k => {
+    const sec = SECTIONS[k];
+    return `<section class="psec"><h1>${sec.icon} ${esc(sec.title)}</h1><div class="pmeta">${meta}</div>` +
+      sec.tabs.map(([name, fn]) => `<div class="ptab">${sec.tabs.length > 1 ? `<h2>${esc(name)}</h2>` : ''}${fn()}</div>`).join('') + '</section>';
+  }).join('');
+
+  // éléments interactifs inutiles à l'impression
+  wrap.querySelectorAll('datalist,.btn,.scroll + p.hint').forEach(n => n.remove());
+  const ib = wrap.querySelector('#importbox'); if (ib && ib.closest('details')) ib.closest('details').remove();
+  wrap.querySelectorAll('details').forEach(d => d.setAttribute('open', ''));
+
+  // champs de saisie -> texte statique
+  wrap.querySelectorAll('input,textarea,select').forEach(el => {
+    let txt;
+    if (el.tagName === 'SELECT') txt = el.options[el.selectedIndex] ? el.options[el.selectedIndex].textContent : '';
+    else if (el.tagName === 'TEXTAREA') txt = el.value;
+    else {
+      txt = el.getAttribute('value') ?? '';
+      if (el.type === 'date' && txt) txt = txt.split('-').reverse().join('/');
+      else if (el.type === 'number' && txt !== '' && num(txt) != null) txt = fmt(num(txt));
+    }
+    const out = document.createElement(el.tagName === 'TEXTAREA' ? 'div' : 'span');
+    out.className = 'pv' + (el.tagName === 'TEXTAREA' ? ' blk' : '');
+    out.textContent = txt;
+    el.replaceWith(out);
+  });
+  wrap.querySelectorAll('[data-act]').forEach(n => n.removeAttribute('data-act'));
+  return wrap;
+}
+
+function printAll() {
+  let pr = $('#print');
+  if (!pr) { pr = document.createElement('div'); pr.id = 'print'; document.body.appendChild(pr); }
+  pr.innerHTML = '';
+  pr.appendChild(buildPrint());
+  refresh();                                  // totaux, moyennes et % pour la version imprimée
+  document.body.classList.add('printall');
+  const done = () => {
+    window.removeEventListener('afterprint', done);
+    document.body.classList.remove('printall');
+    setTimeout(() => { if (!document.body.classList.contains('printall')) pr.innerHTML = ''; }, 500);
+  };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 60);
+}
 
 /* =====================================================================
    11. DÉMARRAGE

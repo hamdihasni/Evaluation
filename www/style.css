@@ -48,3 +48,33 @@ tfoot td{background:#f8faff;font-weight:600;position:sticky;bottom:0}
 .stack{display:flex;flex-direction:column;gap:8px}
 .cover{text-align:center}.cover .big{font-size:20px;font-weight:700;color:var(--pri);margin:8px 0}
 .stats{display:flex;gap:16px;font-weight:600;margin-top:8px}
+
+/* ===== Impression de tout le dossier ===== */
+#print{display:none}
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  html,body{background:#fff;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body.printall #app,body.printall #modal{display:none!important}
+  body.printall #print{display:block}
+  #print .psec{break-before:page}
+  #print .psec:first-child{break-before:auto}
+  #print .psec>h1{font-size:18px;margin:0 0 2px;color:var(--pri);border-bottom:2px solid var(--pri);padding-bottom:3px}
+  #print .pmeta{font-size:10px;color:var(--mut);margin-bottom:8px}
+  #print .ptab h2{font-size:14px;margin:12px 0 6px;color:var(--pri2)}
+  #print .card{border:1px solid #bbb;margin-bottom:8px}
+  #print .errcard,#print details.card{break-inside:avoid}
+  #print details>summary{list-style:none}
+  #print .scroll{overflow:visible;max-height:none;border:0}
+  #print table{width:100%;font-size:9.5px}
+  #print thead{position:static;display:table-header-group}
+  #print tfoot{position:static;display:table-footer-group}
+  #print tfoot td{position:static}
+  #print .sticky{position:static;min-width:0;max-width:none;overflow:visible}
+  #print tr{break-inside:avoid}
+  #print .f .pv{display:block;min-height:1.5em;padding:2px 0;border-bottom:1px dotted #888;white-space:pre-wrap}
+  #print .pv.blk{border:1px solid #ccc;border-radius:4px;min-height:3em;padding:4px}
+  #print td .pv,#print th .pv{display:inline;min-height:0;padding:0;border:0}
+  #print .stu{grid-template-columns:28px 1fr 110px 50px}
+  #print .stu .pv{display:block;min-height:1.4em;border-bottom:1px dotted #aaa}
+  #print .tog{width:28px;height:22px;font-size:13px}
+}
