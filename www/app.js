@@ -26,6 +26,9 @@ const cellsOf = g => g.crit.flatMap(cr => cr.cells
   ? cr.cells.map((m, i) => ({ key: `${cr.c}_${i + 1}`, lab: 'I' + (i + 1), max: m, min: cr.min }))
   : [{ key: cr.c, lab: '', max: cr.max, min: cr.min }]);
 
+// niveaux de maîtrise d'un indicateur -> fraction du barème (les points restent modifiables ensuite)
+const LV = ['---', '+--', '++-', '+++'], LVF = [0, 1 / 3, 2 / 3, 1];
+
 const GROUPS_4 = ['Groupe 1', 'Groupe 2', 'Groupe 3', 'Groupe 4'];
 const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 
@@ -35,7 +38,7 @@ const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 const LS = 'dossier5.local.v1';
 const mkStudents = n => Array.from({ length: n }, (_, i) => ({ id: 's' + (i + 1), nom: '', naiss: '', sexe: '' }));
 const mkGroups = () => Array.from({ length: 4 }, () => ({ noms: '', crit: '', diff: '', dec: '' }));
-const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '' });
+const skill = () => ({ sc: {}, lv: {}, pre: {}, err: [], groups: mkGroups(), remed: '' });
 
 const defaultState = () => ({
   v: 1, updatedAt: 0,
@@ -166,14 +169,18 @@ function gridHtml(g) {
   const rows = S.students.map((s, i) => {
     const r = S[g].sc[s.id] || {};
     return `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${cfg.pre ? `<td>${preSelect(g, s.id, i)}</td>` : ''}` +
-      cells.map(c => `<td><input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`).join('') +
+      cells.map(c => {
+        const lv = (((S[g].lv || {})[s.id]) || {})[c.key] || '';
+        return `<td><select class="lv" data-max="${c.max}" data-lv="${g}|${s.id}|${c.key}" aria-label="Niveau">${['', ...LV].map(l => `<option value="${l}" ${l === lv ? 'selected' : ''}>${l}</option>`).join('')}</select>` +
+          `<input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`;
+      }).join('') +
       `<td class="tot" data-calc="rt" data-g="${g}" data-sid="${s.id}"></td></tr>`;
   }).join('');
   const foot = `<tr><td class="sticky">Moyenne</td>${cfg.pre ? '<td></td>' : ''}` +
     cells.map(c => `<td data-calc="ca" data-g="${g}" data-k="${c.key}" data-max="${c.max}"></td>`).join('') +
     `<td class="tot" data-calc="ga" data-g="${g}"></td></tr>`;
   return `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
-    <p class="hint">Saisissez les points obtenus (la valeur est plafonnée au barème de chaque indicateur). Totaux et moyennes sont calculés automatiquement.</p>`;
+    <p class="hint">Choisissez un niveau (--- = 0 · +-- = ⅓ · ++- = ⅔ · +++ = barème complet) ou saisissez directement les points : ils restent modifiables et sont plafonnés au barème. Totaux et moyennes sont calculés automatiquement.</p>`;
 }
 
 function errorsHtml(g) {
@@ -380,7 +387,24 @@ document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.b) return;
   let v = t.value;
   if (t.dataset.max !== undefined) { const n = num(v); v = n == null ? '' : n; }
-  setP(t.dataset.b, v); changed(); refresh();
+  setP(t.dataset.b, v);
+  if (t.dataset.max !== undefined) {   // points modifiés à la main : le niveau n'est plus d'actualité
+    const lp = t.dataset.b.replace('|sc|', '|lv|');
+    if (getP(lp)) { setP(lp, ''); const sel = t.parentElement.querySelector('select.lv'); if (sel) sel.value = ''; }
+  }
+  changed(); refresh();
+});
+// choix d'un niveau (---, +--, ++-, +++) -> points = barème × fraction
+document.addEventListener('change', e => {
+  const t = e.target; if (!t.dataset || !t.dataset.lv) return;
+  const [g, sid, key] = t.dataset.lv.split('|'), i = LV.indexOf(t.value);
+  setP(`${g}|lv|${sid}|${key}`, t.value);
+  if (i >= 0) {
+    const v = Math.round(+t.dataset.max * LVF[i] * 100) / 100;
+    setP(`${g}|sc|${sid}|${key}`, v);
+    const inp = t.parentElement.querySelector('input.n'); if (inp) inp.value = v;
+  }
+  changed(); refresh();
 });
 document.addEventListener('change', e => {
   const t = e.target; if (!t.dataset || !t.dataset.b) return;
@@ -466,8 +490,9 @@ function buildPrint() {
       if (el.type === 'date' && txt) txt = txt.split('-').reverse().join('/');
       else if (el.type === 'number' && txt !== '' && num(txt) != null) txt = fmt(num(txt));
     }
+    if (el.classList.contains('lv') && !txt) { el.remove(); return; }
     const out = document.createElement(el.tagName === 'TEXTAREA' ? 'div' : 'span');
-    out.className = 'pv' + (el.tagName === 'TEXTAREA' ? ' blk' : '');
+    out.className = 'pv' + (el.tagName === 'TEXTAREA' ? ' blk' : '') + (el.classList.contains('lv') ? ' lvl' : '');
     out.textContent = txt;
     el.replaceWith(out);
   });

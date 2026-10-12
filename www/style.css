@@ -34,6 +34,7 @@ th.min{background:#dbe6ff}th.perf{background:#fde9c8}
 thead .sticky{z-index:6;background:#e8edf9}
 td input.n{width:50px;padding:6px 2px;text-align:center;border-radius:6px}
 td select{width:auto;padding:5px 2px;font-size:13px}
+td select.lv{display:block;width:50px;margin:0 auto 3px;padding:4px 0;font-size:12px;font-weight:700;text-align:center;text-align-last:center;letter-spacing:-1px}
 .tot{font-weight:700;background:#f0fdf4;min-width:54px}
 tfoot td{background:#f8faff;font-weight:600;position:sticky;bottom:0}
 .tog{width:44px;height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:18px;font-weight:700}
@@ -74,6 +75,7 @@ tfoot td{background:#f8faff;font-weight:600;position:sticky;bottom:0}
   #print .f .pv{display:block;min-height:1.5em;padding:2px 0;border-bottom:1px dotted #888;white-space:pre-wrap}
   #print .pv.blk{border:1px solid #ccc;border-radius:4px;min-height:3em;padding:4px}
   #print td .pv,#print th .pv{display:inline;min-height:0;padding:0;border:0}
+  #print td .pv.lvl{display:block;font-weight:700}
   #print .stu{grid-template-columns:28px 1fr 110px 50px}
   #print .stu .pv{display:block;min-height:1.4em;border-bottom:1px dotted #aaa}
   #print .tog{width:28px;height:22px;font-size:13px}
