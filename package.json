@@ -4,7 +4,7 @@
   "private": true,
   "description": "Cahier d'évaluation 5ème année - Circonscription Thala (français)",
   "scripts": {
-    "build:cloud": "esbuild cloud-src/cloud.js --bundle --format=esm --minify --outfile=www/cloud.js",
+    "build:cloud": "esbuild cloud-src/cloud.js cloud-src/pdf.js --bundle --format=esm --minify --outdir=www --external:canvg --external:html2canvas --external:dompurify",
     "android:add": "cap add android",
     "android:sync": "npm run build:cloud && cap sync android",
     "serve": "python3 -m http.server 8080 -d www"
@@ -13,7 +13,11 @@
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.2",
     "@capacitor/core": "^6.2.0",
-    "firebase": "^10.14.1"
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/share": "^6.0.0",
+    "firebase": "^10.14.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0",

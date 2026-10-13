@@ -6,6 +6,16 @@ conjugaison/grammaire/orthographe, tableaux d'erreurs, bilans par groupes de bes
 Totaux et moyennes sont calculés automatiquement. Les données sont enregistrées sur l'appareil
 **et** dans le cloud (Firebase), avec fonctionnement hors-ligne puis synchronisation.
 
+## Nouveautés
+- **Plusieurs classes** : bouton 🏫 (en haut) ou tuile « Mes classes ». Chaque classe a ses élèves, notes, erreurs et bilans.
+  Une nouvelle classe recopie l'école, l'année et l'enseignant(e). Renommer : Couverture → Classe.
+  Les anciens dossiers (une seule classe) sont convertis automatiquement, sans perte.
+- **Apparence** (tuile 🎨) : 7 polices, taille du texte de 12 à 24 px, thèmes de couleurs et couleurs libres
+  (principale, accent, texte, fond). Réglages enregistrés sur l'appareil.
+- **Imprimer / PDF** (tuile 🖨️) : choix des rubriques et de l'orientation. Sur Android, le PDF s'ouvre dans le menu de
+  partage (enregistrer, Drive, WhatsApp, imprimer…). Le PDF reprend la police (sans-serif, serif ou machine),
+  la taille et la couleur principale choisies. Il ne contient que des caractères latins (français).
+
 ## Obtenir l'APK (sans installer Android Studio) — environ 20 minutes
 
 ### 1. Créer le projet cloud (Firebase, gratuit)
@@ -37,10 +47,11 @@ npx cap open android      # puis Build > Build APK(s)
 ```
 
 ## Tester dans un navigateur
-`npm run serve` puis http://localhost:8080 (sans Firebase configuré : mode local uniquement).
+`npm run serve` puis http://localhost:8080 (sans Firebase configuré : mode local uniquement ;
+l'export PDF demande d'abord `npm install && npm run build:cloud`).
 
 ## Remarques
-- Un seul dossier par compte (une classe). Pour plusieurs classes : un compte par classe, ou me demander l'extension.
+- Un compte = toutes vos classes (synchronisées ensemble). En cas de modification sur deux appareils hors-ligne, la version la plus récente l'emporte.
 - Barèmes modifiables en haut de `www/app.js` (objet `GRIDS`). Hypothèses faites là où le document
   papier ne détaille pas : expression orale C6 = 0,5 + 0,25 + 0,25 ; lecture « Lec. Voc » et « Lec. Comp »
   = 0,75 chacune (pour atteindre 20) ; production écrite C7 en perfectionnement.
