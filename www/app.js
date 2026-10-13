@@ -26,19 +26,16 @@ const cellsOf = g => g.crit.flatMap(cr => cr.cells
   ? cr.cells.map((m, i) => ({ key: `${cr.c}_${i + 1}`, lab: 'I' + (i + 1), max: m, min: cr.min }))
   : [{ key: cr.c, lab: '', max: cr.max, min: cr.min }]);
 
-// niveaux de maîtrise d'un indicateur -> fraction du barème (les points restent modifiables ensuite)
-const LV = ['---', '+--', '++-', '+++'], LVF = [0, 1 / 3, 2 / 3, 1];
-
 const GROUPS_4 = ['Groupe 1', 'Groupe 2', 'Groupe 3', 'Groupe 4'];
 const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 
 /* =====================================================================
    2. ÉTAT
    ===================================================================== */
-const LS = 'dossier5.local.v1';
+const LS1 = 'dossier5.local.v1', LS2 = 'dossier5.local.v2';
 const mkStudents = n => Array.from({ length: n }, (_, i) => ({ id: 's' + (i + 1), nom: '', naiss: '', sexe: '' }));
 const mkGroups = () => Array.from({ length: 4 }, () => ({ noms: '', crit: '', diff: '', dec: '' }));
-const skill = () => ({ sc: {}, lv: {}, pre: {}, err: [], groups: mkGroups(), remed: '' });
+const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '' });
 
 const defaultState = () => ({
   v: 1, updatedAt: 0,
@@ -63,20 +60,38 @@ function merge(base, src) {
   return src === undefined ? base : src;
 }
 
-let S = defaultState();
+const newId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+const defaultDB = () => ({ v: 2, updatedAt: 0, cur: 'c1', order: ['c1'], classes: { c1: defaultState() } });
+// accepte l'ancien format (une seule classe) comme le nouveau (plusieurs classes)
+function normDB(raw) {
+  if (raw && raw.classes && Array.isArray(raw.order)) {
+    const db = { v: 2, updatedAt: raw.updatedAt || 0, cur: raw.cur, order: raw.order.filter(id => raw.classes[id]), classes: {} };
+    if (!db.order.length) return defaultDB();
+    for (const id of db.order) db.classes[id] = merge(defaultState(), raw.classes[id]);
+    if (!db.classes[db.cur]) db.cur = db.order[0];
+    return db;
+  }
+  if (raw && raw.students) return { v: 2, updatedAt: raw.updatedAt || 0, cur: 'c1', order: ['c1'], classes: { c1: merge(defaultState(), raw) } };
+  return defaultDB();
+}
+let DB = defaultDB();
+let S = DB.classes[DB.cur];
+const setDB = db => { DB = db; S = DB.classes[DB.cur]; };
 let user = null, status = 'local', skipAuth = false, authReady = false;
 let view = { sec: 'home', tab: 0 };
 
 function loadLocal() {
   try {
-    const raw = JSON.parse(localStorage.getItem(LS) || 'null');
-    if (raw && raw.state) { S = merge(defaultState(), raw.state); return raw.owner || null; }
+    let raw = JSON.parse(localStorage.getItem(LS2) || 'null');
+    if (raw && raw.db) { setDB(normDB(raw.db)); return raw.owner || null; }
+    raw = JSON.parse(localStorage.getItem(LS1) || 'null');   // ancienne version : migration
+    if (raw && raw.state) { setDB(normDB(raw.state)); return raw.owner || null; }
   } catch (e) { /* ignore */ }
   return null;
 }
 let owner = loadLocal();
 skipAuth = localStorage.getItem('dossier5.skip') === '1';
-const saveLocal = () => { try { localStorage.setItem(LS, JSON.stringify({ owner, state: S })); } catch (e) { /* quota */ } };
+const saveLocal = () => { try { localStorage.setItem(LS2, JSON.stringify({ owner, db: DB })); } catch (e) { /* quota */ } };
 
 /* =====================================================================
    3. OUTILS
@@ -169,18 +184,14 @@ function gridHtml(g) {
   const rows = S.students.map((s, i) => {
     const r = S[g].sc[s.id] || {};
     return `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${cfg.pre ? `<td>${preSelect(g, s.id, i)}</td>` : ''}` +
-      cells.map(c => {
-        const lv = (((S[g].lv || {})[s.id]) || {})[c.key] || '';
-        return `<td><select class="lv" data-max="${c.max}" data-lv="${g}|${s.id}|${c.key}" aria-label="Niveau">${['', ...LV].map(l => `<option value="${l}" ${l === lv ? 'selected' : ''}>${l}</option>`).join('')}</select>` +
-          `<input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`;
-      }).join('') +
+      cells.map(c => `<td><input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`).join('') +
       `<td class="tot" data-calc="rt" data-g="${g}" data-sid="${s.id}"></td></tr>`;
   }).join('');
   const foot = `<tr><td class="sticky">Moyenne</td>${cfg.pre ? '<td></td>' : ''}` +
     cells.map(c => `<td data-calc="ca" data-g="${g}" data-k="${c.key}" data-max="${c.max}"></td>`).join('') +
     `<td class="tot" data-calc="ga" data-g="${g}"></td></tr>`;
   return `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
-    <p class="hint">Choisissez un niveau (--- = 0 · +-- = ⅓ · ++- = ⅔ · +++ = barème complet) ou saisissez directement les points : ils restent modifiables et sont plafonnés au barème. Totaux et moyennes sont calculés automatiquement.</p>`;
+    <p class="hint">Saisissez les points obtenus (la valeur est plafonnée au barème de chaque indicateur). Totaux et moyennes sont calculés automatiquement.</p>`;
 }
 
 function errorsHtml(g) {
@@ -281,6 +292,7 @@ const SECTIONS = {
       remedHtml('conj|remed', 'Dispositif de remédiation (conjugaison / grammaire / orthographe)')]] }
 };
 const HOME_ORDER = ['couv', 'eleves', 'recit', 'oral', 'lect', 'ecrit', 'conj'];
+const EXTRA = [['classes', '🏫', 'Mes classes', 'Plusieurs classes'], ['look', '🎨', 'Apparence', 'Police, taille, couleurs'], ['pdf', '🖨️', 'Imprimer / PDF', 'Exporter le dossier']];
 
 /* =====================================================================
    7. RENDU
@@ -298,14 +310,14 @@ function render(keepScroll) {
   const title = view.sec === 'home' ? `Dossier d’évaluation · ${S.meta.classe}` : sec.title;
   let body;
   if (view.sec === 'home') {
-    body = `<div class="home">${HOME_ORDER.map(k => `<button class="tile" data-go="${k}"><span>${SECTIONS[k].icon}</span>${esc(SECTIONS[k].title)}<small>${esc(SECTIONS[k].sub)}</small></button>`).join('')}</div>
-      <button class="btn sec" data-act="printall" style="width:100%;margin-top:14px">🖨️ Imprimer tout le dossier</button>
+    body = `<div class="home">${HOME_ORDER.map(k => `<button class="tile" data-go="${k}"><span>${SECTIONS[k].icon}</span>${esc(SECTIONS[k].title)}<small>${esc(SECTIONS[k].sub)}</small></button>`).join('')}
+      ${EXTRA.map(([a, i, t, sub]) => `<button class="tile alt" data-act="${a}"><span>${i}</span>${t}<small>${sub}</small></button>`).join('')}</div>
       <p class="hint" style="text-align:center;margin-top:18px">Circonscription ${esc(S.meta.circ)} pour la langue française</p>`;
   } else {
     if (view.tab >= sec.tabs.length) view.tab = 0;
     body = (sec.tabs.length > 1 ? `<div class="tabs">${sec.tabs.map((t, i) => `<button data-tab="${i}" class="${i === view.tab ? 'on' : ''}">${t[0]}</button>`).join('')}</div>` : '') + sec.tabs[view.tab][1]();
   }
-  $('#app').innerHTML = `<header>${view.sec !== 'home' ? '<button data-act="home" aria-label="Accueil">←</button>' : ''}<h1>${esc(title)}</h1>${chip()}<button data-act="printall" aria-label="Imprimer tout le dossier">🖨️</button><button data-act="acct" aria-label="Compte">${user ? '👤' : '☁️'}</button></header><main>${body}</main>`;
+  $('#app').innerHTML = `<header>${view.sec !== 'home' ? '<button data-act="home" aria-label="Accueil">←</button>' : ''}<h1>${esc(title)}</h1>${chip()}<button data-act="classes" aria-label="Classes">🏫</button><button data-act="acct" aria-label="Compte">${user ? '👤' : '☁️'}</button></header><main>${body}</main>`;
   refresh();
   window.scrollTo(0, y);
 }
@@ -316,25 +328,28 @@ const go = (sec, tab = 0) => { view = { sec, tab }; render(); };
    ===================================================================== */
 let tLocal = null, tCloud = null;
 function changed() {
-  S.updatedAt = Date.now();
+  DB.updatedAt = Date.now();
   clearTimeout(tLocal); tLocal = setTimeout(saveLocal, 250);
   if (user) { setStatus('pend'); clearTimeout(tCloud); tCloud = setTimeout(pushNow, 1500); }
 }
 async function pushNow() {
   if (!user) return;
   saveLocal(); setStatus('sync');
-  try { await cloud.push(user.uid, JSON.stringify(S), S.updatedAt); setStatus('ok'); } catch (e) { setStatus('err'); }
+  try { await cloud.push(user.uid, JSON.stringify(DB), DB.updatedAt); setStatus('ok'); } catch (e) { setStatus('err'); }
 }
 async function syncDown() {
   setStatus('sync');
   try {
     // un autre compte avait utilisé cet appareil : ne pas mélanger les données
-    if (owner && owner !== user.uid) { S = defaultState(); owner = user.uid; saveLocal(); render(true); }
+    if (owner && owner !== user.uid) { setDB(defaultDB()); owner = user.uid; saveLocal(); render(true); }
     const r = await cloud.pull(user.uid);
     owner = user.uid;
     if (r && r.data) {
-      const remote = JSON.parse(r.data);
-      if ((remote.updatedAt || 0) > (S.updatedAt || 0)) { S = merge(defaultState(), remote); saveLocal(); render(); setStatus('ok'); return; }
+      const remote = normDB(JSON.parse(r.data)), keep = DB.cur;
+      if ((remote.updatedAt || 0) > (DB.updatedAt || 0)) {
+        setDB(remote); if (remote.classes[keep]) { DB.cur = keep; S = DB.classes[keep]; }
+        saveLocal(); render(); setStatus('ok'); return;
+      }
     }
     await pushNow();
   } catch (e) { setStatus('err'); }
@@ -381,30 +396,260 @@ async function authDo(kind) {
 }
 
 /* =====================================================================
+   9b. PLUSIEURS CLASSES
+   ===================================================================== */
+function classModal(msg = '') {
+  const rows = DB.order.map(id => {
+    const c = DB.classes[id], n = c.students.filter(s => s.nom.trim()).length;
+    return `<div class="clsrow"><button class="cls ${id === DB.cur ? 'on' : ''}" data-act="selcls" data-id="${id}">
+      <b>${esc(c.meta.classe || 'Classe')}</b><small>${esc(c.meta.ecole || '—')} · ${n} élève${n > 1 ? 's' : ''}</small></button>
+      ${DB.order.length > 1 ? `<button class="btn red sm" data-act="delcls" data-id="${id}" aria-label="Supprimer la classe">✕</button>` : ''}</div>`;
+  }).join('');
+  modal(`<h2>🏫 Mes classes</h2>
+    <p class="hint">Touchez une classe pour l’ouvrir. Chaque classe a ses propres élèves, notes, erreurs et bilans. Pour la renommer : Couverture → Classe.</p>
+    ${rows}
+    <label class="f" style="margin-top:10px"><span>Nouvelle classe (l’école, l’année et l’enseignant(e) sont recopiés)</span><input id="cls-new" placeholder="ex. 5ème B"></label>
+    <div class="msg" id="cls-msg">${esc(msg)}</div>
+    <div class="stack"><button class="btn" data-act="addcls">+ Créer la classe</button><button class="btn sec" data-act="closemodal">Fermer</button></div>`);
+}
+function switchClass(id) {
+  if (!DB.classes[id]) return;
+  DB.cur = id; S = DB.classes[id]; saveLocal();
+  modal(''); view = { sec: 'home', tab: 0 }; render();
+}
+function addClass() {
+  const name = ($('#cls-new').value || '').trim();
+  if (!name) { const m = $('#cls-msg'); if (m) m.textContent = 'Saisissez le nom de la classe.'; return; }
+  const id = newId(), st = defaultState();
+  st.meta = { ...S.meta, classe: name };
+  DB.classes[id] = st; DB.order.push(id); DB.cur = id; S = st;
+  changed(); modal(''); view = { sec: 'home', tab: 0 }; render();
+}
+function delClass(id) {
+  if (DB.order.length < 2 || !DB.classes[id]) return;
+  if (!confirm(`Supprimer définitivement la classe « ${DB.classes[id].meta.classe} » avec tous ses élèves et ses notes ?`)) return;
+  DB.order = DB.order.filter(x => x !== id); delete DB.classes[id];
+  if (DB.cur === id) { DB.cur = DB.order[0]; S = DB.classes[DB.cur]; }
+  changed(); classModal(); render(true);
+}
+
+/* =====================================================================
+   9c. APPARENCE (police, taille, couleurs) — enregistrée sur l'appareil
+   ===================================================================== */
+const FONTS = {
+  sys:   { label: 'Par défaut', css: 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif', pdf: 'helvetica' },
+  read:  { label: 'Lisible (Verdana)', css: 'Verdana,Tahoma,Geneva,sans-serif', pdf: 'helvetica' },
+  serif: { label: 'Avec empattements (Serif)', css: 'Georgia,"Times New Roman",serif', pdf: 'times' },
+  mono:  { label: 'Machine à écrire', css: '"Courier New",Courier,monospace', pdf: 'courier' },
+  hand:  { label: 'Manuscrit', css: '"Comic Sans MS","Segoe Print",cursive', pdf: 'helvetica' },
+  casual:{ label: 'Décontracté', css: '"Trebuchet MS",casual,sans-serif', pdf: 'helvetica' },
+  cond:  { label: 'Condensé', css: '"Arial Narrow","sans-serif-condensed",sans-serif', pdf: 'helvetica' }
+};
+const PRESETS = [['Bleu', '#1e3a8a', '#2f5bd8'], ['Vert', '#14532d', '#16a34a'], ['Violet', '#4c1d95', '#7c3aed'],
+  ['Rouge', '#7f1d1d', '#dc2626'], ['Orange', '#7c2d12', '#ea580c'], ['Turquoise', '#134e4a', '#0d9488'], ['Gris', '#1f2937', '#4b5563']];
+const DEF_PREFS = { font: 'sys', size: 16, pri: '#1e3a8a', pri2: '#2f5bd8', ink: '#1b2437', bg: '#f4f6fb' };
+const LSP = 'dossier5.prefs';
+const isHex = v => /^#[0-9a-f]{6}$/i.test(v || '');
+function loadPrefs() {
+  const p = { ...DEF_PREFS };
+  try {
+    const r = JSON.parse(localStorage.getItem(LSP) || 'null') || {};
+    if (FONTS[r.font]) p.font = r.font;
+    if (+r.size >= 12 && +r.size <= 24) p.size = Math.round(+r.size);
+    for (const k of ['pri', 'pri2', 'ink', 'bg']) if (isHex(r[k])) p[k] = r[k];
+  } catch (e) { /* ignore */ }
+  return p;
+}
+let PREFS = loadPrefs();
+const savePrefs = () => { try { localStorage.setItem(LSP, JSON.stringify(PREFS)); } catch (e) { /* quota */ } };
+const rgb = h => { const n = parseInt(String(h).slice(1), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const toHex = a => '#' + a.map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
+const mix = (a, b, t) => { const A = rgb(a), B = rgb(b); return toHex(A.map((x, i) => x * t + B[i] * (1 - t))); };
+const lum = h => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+const onColor = h => (lum(h) > .45 ? '#111827' : '#ffffff');
+function applyPrefs() {
+  const st = document.documentElement.style, P = PREFS;
+  st.fontSize = P.size + 'px';
+  st.setProperty('--ff', FONTS[P.font].css);
+  st.setProperty('--pri', P.pri); st.setProperty('--pri2', P.pri2);
+  st.setProperty('--ink', P.ink); st.setProperty('--bg', P.bg);
+  st.setProperty('--onpri', onColor(P.pri)); st.setProperty('--onpri2', onColor(P.pri2));
+  st.setProperty('--soft', mix(P.pri2, '#ffffff', .12)); st.setProperty('--soft2', mix(P.pri2, '#ffffff', .22));
+  const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', P.pri);
+}
+function lookModal() {
+  const P = PREFS;
+  modal(`<h2>🎨 Apparence</h2>
+    <p class="hint">Réglages enregistrés sur cet appareil. Ils s’appliquent aussi au PDF (police, taille et couleur principale).</p>
+    <div class="f"><span>Police</span><div class="fonts">${Object.entries(FONTS).map(([k, f]) =>
+      `<button class="fontopt ${P.font === k ? 'on' : ''}" data-act="font" data-k="${k}" style="font-family:${f.css}">${esc(f.label)} — Aa Bb 123</button>`).join('')}</div></div>
+    <label class="f"><span>Taille du texte : <b id="pf-size-v">${P.size} px</b></span><input type="range" min="12" max="24" step="1" value="${P.size}" data-pref="size"></label>
+    <div class="f"><span>Thèmes de couleurs</span><div class="sws">${PRESETS.map((p, i) =>
+      `<button class="sw" data-act="preset" data-i="${i}" aria-label="${p[0]}" title="${p[0]}" style="background:linear-gradient(135deg,${p[1]} 50%,${p[2]} 50%)"></button>`).join('')}</div></div>
+    <div class="row2"><label class="f"><span>Couleur principale (en-tête, titres)</span><input type="color" data-pref="pri" value="${P.pri}"></label>
+      <label class="f"><span>Couleur d’accent (boutons)</span><input type="color" data-pref="pri2" value="${P.pri2}"></label></div>
+    <div class="row2"><label class="f"><span>Couleur du texte</span><input type="color" data-pref="ink" value="${P.ink}"></label>
+      <label class="f"><span>Couleur du fond</span><input type="color" data-pref="bg" value="${P.bg}"></label></div>
+    <div class="stack"><button class="btn" data-act="closemodal">Terminé</button><button class="btn red sm" data-act="resetlook">Rétablir les réglages par défaut</button></div>`);
+}
+
+/* =====================================================================
+   9d. EXPORT PDF (le dessin du PDF est fait par www/pdf.js : jsPDF)
+   ===================================================================== */
+const PDF_SECS = [['couv', 'Couverture'], ['eleves', 'Liste des élèves'], ['recit', 'Récitation'], ['oral', 'Expression orale'],
+  ['lect', 'Lecture'], ['ecrit', 'Production écrite'], ['conj', 'Conjugaison · Grammaire · Orthographe']];
+const pdfSel = Object.fromEntries(PDF_SECS.map(([k]) => [k, true]));
+let pdfOrient = 'landscape';
+
+function pdfModal(msg = '', ok = false) {
+  modal(`<h2>🖨️ Imprimer / PDF</h2>
+    <p class="hint">Classe : <b>${esc(S.meta.classe)}</b>. Choisissez les rubriques à inclure. Sur Android, le PDF s’ouvre dans le menu de partage : enregistrer, envoyer ou imprimer.</p>
+    ${PDF_SECS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-pdfsec="${k}" ${pdfSel[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+    <label class="f" style="margin-top:8px"><span>Orientation de la page</span><select id="pdf-or">
+      <option value="landscape" ${pdfOrient === 'landscape' ? 'selected' : ''}>Paysage (recommandé pour les grilles)</option>
+      <option value="portrait" ${pdfOrient === 'portrait' ? 'selected' : ''}>Portrait</option></select></label>
+    <div class="msg ${ok ? 'ok' : ''}" id="pdf-msg">${esc(msg)}</div>
+    <div class="stack"><button class="btn" data-act="mkpdf">Générer le PDF</button><button class="btn sec" data-act="closemodal">Fermer</button></div>`);
+}
+
+const dFr = d => (d ? String(d).split('-').reverse().join('/') : '');
+const GF = { noms: 'Noms et prénoms', crit: 'Critères non maîtrisés', diff: 'Difficultés à traiter', dec: 'Décisions de remédiation' };
+
+function gridModel(g) {
+  const cfg = GRIDS[g], cells = cellsOf(cfg);
+  const preLab = { poeme: 'Poème', situ: 'Situation', texte: 'Texte' }[cfg.pre];
+  const nMin = cells.filter(c => c.min).length, nPerf = cells.length - nMin;
+  const h1 = [{ c: 'Élève', rowSpan: 3 }];
+  if (cfg.pre) h1.push({ c: preLab, rowSpan: 3 });
+  if (nMin) h1.push({ c: 'Critères minimaux', colSpan: nMin });
+  if (nPerf) h1.push({ c: 'Perfectionnement', colSpan: nPerf, kind: 'perf' });
+  h1.push({ c: `Total\n/${cfg.total}`, rowSpan: 3 });
+  const h2 = cfg.crit.map(cr => {
+    const span = cr.cells ? cr.cells.length : 1, mx = cr.cells ? cr.cells.reduce((a, b) => a + b, 0) : cr.max;
+    return { c: `${cr.name || cr.c}\n${fmt(mx)}`, colSpan: span, kind: cr.min ? '' : 'perf' };
+  });
+  const h3 = cells.map(c => ({ c: (c.lab ? c.lab + '\n' : '') + fmt(c.max), kind: c.min ? '' : 'perf' }));
+  const body = S.students.map((s, i) => {
+    const r = S[g].sc[s.id] || {};
+    const cur = S[g].pre[s.id] ?? (g === 'recit' ? (i % 2 ? 'P2' : 'P1') : '');
+    const t = rowTotal(g, s.id);
+    return [stuLabel(s, i), ...(cfg.pre ? [cur] : []),
+      ...cells.map(c => { const v = num(r[c.key]); return v == null ? '' : fmt(Math.min(Math.max(v, 0), c.max)); }),
+      t == null ? '' : fmt(t)];
+  });
+  let ts = 0, tn = 0;
+  for (const st of S.students) { const x = rowTotal(g, st.id); if (x != null) { ts += x; tn++; } }
+  const foot = [['Moyenne', ...(cfg.pre ? [''] : []),
+    ...cells.map(c => { const v = colAvg(g, c.key, c.max); return v == null ? '' : fmt(v); }), tn ? fmt(ts / tn) : '']];
+  return { t: 'table', head: [h1, h2, h3], body, foot, firstW: 34 };
+}
+const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
+  head: [['Nom et prénom', 'Erreur', 'Critère concerné', 'Type de l’erreur', 'Hypothèses explicatives']],
+  body: S[g].err.map(e => [e.eleve, e.erreur, e.crit, e.type, e.hyp]) });
+const grpModel = (arr, labels, fields) => ({ t: 'table', align: 'left', minH: 16, firstW: 22,
+  head: [['Groupe', ...fields.map(f => GF[f])]], body: arr.map((gr, i) => [labels[i], ...fields.map(f => gr[f] || '')]) });
+
+function buildModel(sel) {
+  const B = [], m = S.meta;
+  const H1 = t => B.push({ t: 'h1', text: t, newPage: B.length > 0 });
+  const H2 = t => B.push({ t: 'h2', text: t });
+  const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
+  const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
+  const G4 = ['noms', 'crit', 'diff', 'dec'];
+
+  if (sel.includes('couv')) {
+    H1('CAHIER D’ÉVALUATION — ' + m.classe);
+    KV('Direction régionale de l’enseignement', m.dre); KV('Circonscription (langue française)', m.circ);
+    KV('École primaire', m.ecole); KV('Classe', m.classe); KV('Année scolaire', m.annee);
+    KV('Enseignant(e)', m.enseignant); KV('L’inspecteur', m.inspecteur); KV('L’assistant pédagogique', m.assistant);
+  }
+  if (sel.includes('eleves')) {
+    H1('Liste des élèves — ' + m.classe + ' — ' + m.annee);
+    B.push({ t: 'table', align: 'center', firstW: 12,
+      head: [['N°', 'Nom et prénom', 'Date de naissance', 'Sexe']],
+      body: S.students.map((s, i) => [String(i + 1), s.nom, dFr(s.naiss), s.sexe]),
+      foot: [['', `Garçons : ${S.students.filter(s => s.sexe === 'G').length}   Filles : ${S.students.filter(s => s.sexe === 'F').length}`, `Effectif : ${S.students.filter(s => s.nom.trim()).length}`, '']] });
+  }
+  if (sel.includes('recit')) {
+    H1('Récitation — grille /5');
+    KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
+    B.push(gridModel('recit'));
+    H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
+  }
+  if (sel.includes('oral')) {
+    const o = S.oral;
+    H1('Expression orale — 5ème année');
+    KV('Performance attendue', o.perf);
+    o.obj.forEach((x, i) => KV('Objectif spécifique ' + (i + 1), x));
+    KV('Structure', o.structure); KV('Lexique', o.lexique);
+    o.sit.forEach((x, i) => KV('Situation S' + (i + 1), x));
+    o.epr.forEach((x, i) => KV('Épreuve d’évaluation n°' + (i + 1), x));
+    H2('Grille d’évaluation /15'); B.push(gridModel('oral'));
+    ERR('oral');
+    H2('Résultats en expression orale'); B.push(grpModel(o.groups, GROUPS_4, G4));
+  }
+  if (sel.includes('lect')) {
+    const l = S.lect;
+    H1('Lecture — grille /20');
+    l.textes.forEach((t, i) => { if ((t.titre || t.texte || '').trim()) { KV(`Texte N°${i + 1}` + (t.titre ? ' — ' + t.titre : ''), t.texte || ' '); } });
+    H2('Grille d’évaluation'); B.push(gridModel('lect'));
+    ERR('lect');
+    H2('Résultats en lecture vocale'); B.push(grpModel(l.groups, GROUPS_4, G4));
+    H2('Résultats en lecture compréhension'); B.push(grpModel(l.groupsComp, GROUPS_4, G4));
+    KV('Dispositif de remédiation de la lecture', l.remed);
+  }
+  if (sel.includes('ecrit')) {
+    const e = S.ecrit;
+    H1('Production écrite — grille /20');
+    B.push(gridModel('ecrit'));
+    ERR('ecrit');
+    H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
+    KV('Dispositif de remédiation de la production', e.remed);
+  }
+  if (sel.includes('conj')) {
+    const c = S.conj, d = [0, 1, 2];
+    H1('Conjugaison · Grammaire · Orthographe');
+    d.forEach(i => KV('Difficulté n°' + (i + 1), c.diffs[i]));
+    const pct = k => { let ok = 0, tot = 0; for (const st of S.students) { const v = (c.marks[st.id] || {})[k]; if (v === 'ok') { ok++; tot++; } else if (v === 'ko') tot++; } return tot ? Math.round(100 * ok / tot) + ' %' : ''; };
+    B.push({ t: 'table', align: 'center', firstW: 40,
+      head: [['Élève', ...d.map(i => 'Diff. ' + (i + 1))]],
+      body: S.students.map((s, i) => [stuLabel(s, i), ...d.map(k => { const v = (c.marks[s.id] || {})['d' + k]; return v === 'ok' ? 'V' : v === 'ko' ? 'X' : ''; })]),
+      foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
+    H2('Résultats des élèves'); B.push(grpModel(c.groups, GROUPS_ABCD, ['noms', 'crit', 'dec']));
+    KV('Dispositif de remédiation', c.remed);
+  }
+  return { title: 'Dossier d’évaluation — ' + m.classe, footer: [m.ecole, m.classe, m.annee].filter(Boolean).join(' · '), blocks: B };
+}
+
+async function makePdf() {
+  const msg = (t, ok) => { const el = $('#pdf-msg'); if (el) { el.className = 'msg' + (ok ? ' ok' : ''); el.textContent = t; } };
+  const sel = PDF_SECS.map(x => x[0]).filter(k => pdfSel[k]);
+  if (!sel.length) return msg('Cochez au moins une rubrique.');
+  const orSel = $('#pdf-or'); if (orSel) pdfOrient = orSel.value;
+  msg('Génération du PDF…', true);
+  try {
+    const mod = await import('./pdf.js');
+    const slug = String(S.meta.classe || 'classe').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+    await mod.exportPdf(buildModel(sel), {
+      orientation: pdfOrient, font: FONTS[PREFS.font].pdf, scale: PREFS.size / 16,
+      colors: { pri: PREFS.pri, pri2: PREFS.pri2, ink: PREFS.ink },
+      fileName: `Dossier_${slug}_${new Date().toISOString().slice(0, 10)}.pdf`
+    });
+    msg('PDF prêt.', true);
+  } catch (e) {
+    if (e && /cancel/i.test(String(e.message || e))) return msg('');
+    msg('Erreur PDF : ' + ((e && e.message) || e));
+  }
+}
+
+/* =====================================================================
    10. ÉVÉNEMENTS
    ===================================================================== */
 document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.b) return;
   let v = t.value;
   if (t.dataset.max !== undefined) { const n = num(v); v = n == null ? '' : n; }
-  setP(t.dataset.b, v);
-  if (t.dataset.max !== undefined) {   // points modifiés à la main : le niveau n'est plus d'actualité
-    const lp = t.dataset.b.replace('|sc|', '|lv|');
-    if (getP(lp)) { setP(lp, ''); const sel = t.parentElement.querySelector('select.lv'); if (sel) sel.value = ''; }
-  }
-  changed(); refresh();
-});
-// choix d'un niveau (---, +--, ++-, +++) -> points = barème × fraction
-document.addEventListener('change', e => {
-  const t = e.target; if (!t.dataset || !t.dataset.lv) return;
-  const [g, sid, key] = t.dataset.lv.split('|'), i = LV.indexOf(t.value);
-  setP(`${g}|lv|${sid}|${key}`, t.value);
-  if (i >= 0) {
-    const v = Math.round(+t.dataset.max * LVF[i] * 100) / 100;
-    setP(`${g}|sc|${sid}|${key}`, v);
-    const inp = t.parentElement.querySelector('input.n'); if (inp) inp.value = v;
-  }
-  changed(); refresh();
+  setP(t.dataset.b, v); changed(); refresh();
 });
 document.addEventListener('change', e => {
   const t = e.target; if (!t.dataset || !t.dataset.b) return;
@@ -422,8 +667,17 @@ document.addEventListener('click', async e => {
   const a = el.dataset.act;
   if (a === 'home') return go('home');
   if (a === 'acct') return authModal();
-  if (a === 'printall') return printAll();
   if (a === 'closemodal') return modal('');
+  if (a === 'classes') return classModal();
+  if (a === 'selcls') return switchClass(el.dataset.id);
+  if (a === 'delcls') return delClass(el.dataset.id);
+  if (a === 'addcls') return addClass();
+  if (a === 'look') return lookModal();
+  if (a === 'font') { PREFS.font = el.dataset.k; applyPrefs(); savePrefs(); return lookModal(); }
+  if (a === 'preset') { const pr = PRESETS[+el.dataset.i]; PREFS.pri = pr[1]; PREFS.pri2 = pr[2]; applyPrefs(); savePrefs(); return lookModal(); }
+  if (a === 'resetlook') { PREFS = { ...DEF_PREFS }; applyPrefs(); savePrefs(); return lookModal(); }
+  if (a === 'pdf') return pdfModal();
+  if (a === 'mkpdf') return makePdf();
   if (a === 'skip') { skipAuth = true; localStorage.setItem('dossier5.skip', '1'); return modal(''); }
   if (a === 'login' || a === 'register' || a === 'resetpw') return authDo(a);
   if (a === 'logout') { await cloud.logout(); modal(''); return; }
@@ -451,6 +705,18 @@ document.addEventListener('click', async e => {
   }
 });
 
+document.addEventListener('input', e => {
+  const t = e.target; if (!t.dataset || !t.dataset.pref) return;
+  const k = t.dataset.pref;
+  if (k === 'size') { PREFS.size = Math.min(24, Math.max(12, Math.round(+t.value) || 16)); const l = $('#pf-size-v'); if (l) l.textContent = PREFS.size + ' px'; }
+  else if (isHex(t.value)) PREFS[k] = t.value;
+  applyPrefs(); savePrefs();
+});
+document.addEventListener('change', e => {
+  const t = e.target; if (!t.dataset || !t.dataset.pdfsec) return;
+  pdfSel[t.dataset.pdfsec] = t.checked;
+});
+
 window.addEventListener('online', () => { if (user) pushNow(); });
 // bouton "retour" Android (plugin @capacitor/app)
 try {
@@ -462,63 +728,9 @@ try {
 } catch (e) { /* navigateur */ }
 
 /* =====================================================================
-   10 bis. IMPRESSION DE TOUT LE DOSSIER
-   Construit une version statique de toutes les sections (tous les onglets),
-   puis lance l'impression. L'affichage écran n'est pas modifié.
-   ===================================================================== */
-function buildPrint() {
-  const wrap = document.createElement('div');
-  const meta = [S.meta.ecole, S.meta.classe, S.meta.annee, S.meta.enseignant].filter(Boolean).map(esc).join(' · ');
-  wrap.innerHTML = HOME_ORDER.map(k => {
-    const sec = SECTIONS[k];
-    return `<section class="psec"><h1>${sec.icon} ${esc(sec.title)}</h1><div class="pmeta">${meta}</div>` +
-      sec.tabs.map(([name, fn]) => `<div class="ptab">${sec.tabs.length > 1 ? `<h2>${esc(name)}</h2>` : ''}${fn()}</div>`).join('') + '</section>';
-  }).join('');
-
-  // éléments interactifs inutiles à l'impression
-  wrap.querySelectorAll('datalist,.btn,.scroll + p.hint').forEach(n => n.remove());
-  const ib = wrap.querySelector('#importbox'); if (ib && ib.closest('details')) ib.closest('details').remove();
-  wrap.querySelectorAll('details').forEach(d => d.setAttribute('open', ''));
-
-  // champs de saisie -> texte statique
-  wrap.querySelectorAll('input,textarea,select').forEach(el => {
-    let txt;
-    if (el.tagName === 'SELECT') txt = el.options[el.selectedIndex] ? el.options[el.selectedIndex].textContent : '';
-    else if (el.tagName === 'TEXTAREA') txt = el.value;
-    else {
-      txt = el.getAttribute('value') ?? '';
-      if (el.type === 'date' && txt) txt = txt.split('-').reverse().join('/');
-      else if (el.type === 'number' && txt !== '' && num(txt) != null) txt = fmt(num(txt));
-    }
-    if (el.classList.contains('lv') && !txt) { el.remove(); return; }
-    const out = document.createElement(el.tagName === 'TEXTAREA' ? 'div' : 'span');
-    out.className = 'pv' + (el.tagName === 'TEXTAREA' ? ' blk' : '') + (el.classList.contains('lv') ? ' lvl' : '');
-    out.textContent = txt;
-    el.replaceWith(out);
-  });
-  wrap.querySelectorAll('[data-act]').forEach(n => n.removeAttribute('data-act'));
-  return wrap;
-}
-
-function printAll() {
-  let pr = $('#print');
-  if (!pr) { pr = document.createElement('div'); pr.id = 'print'; document.body.appendChild(pr); }
-  pr.innerHTML = '';
-  pr.appendChild(buildPrint());
-  refresh();                                  // totaux, moyennes et % pour la version imprimée
-  document.body.classList.add('printall');
-  const done = () => {
-    window.removeEventListener('afterprint', done);
-    document.body.classList.remove('printall');
-    setTimeout(() => { if (!document.body.classList.contains('printall')) pr.innerHTML = ''; }, 500);
-  };
-  window.addEventListener('afterprint', done);
-  setTimeout(() => window.print(), 60);
-}
-
-/* =====================================================================
    11. DÉMARRAGE
    ===================================================================== */
+applyPrefs();
 render();
 if (cloud.available) status = 'local';
 cloud.onUser(async u => {
