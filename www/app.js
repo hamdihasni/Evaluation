@@ -28,6 +28,7 @@ const cellsOf = g => g.crit.flatMap(cr => cr.cells
 
 const GROUPS_4 = ['Groupe 1', 'Groupe 2', 'Groupe 3', 'Groupe 4'];
 const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
+const LEVELS = ['---', '--+', '-++', '+++'];
 
 /* =====================================================================
    2. ÉTAT
@@ -35,7 +36,7 @@ const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 const LS1 = 'dossier5.local.v1', LS2 = 'dossier5.local.v2';
 const mkStudents = n => Array.from({ length: n }, (_, i) => ({ id: 's' + (i + 1), nom: '', naiss: '', sexe: '' }));
 const mkGroups = () => Array.from({ length: 4 }, () => ({ noms: '', crit: '', diff: '', dec: '' }));
-const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '' });
+const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '', unite: '', perf: '', lvl: {} });
 
 const defaultState = () => ({
   v: 1, updatedAt: 0,
@@ -46,7 +47,7 @@ const defaultState = () => ({
   oral: { ...skill(), perf: '', obj: ['', '', '', ''], structure: '', lexique: '', sit: ['', '', '', ''], epr: ['', '', ''] },
   lect: { ...skill(), textes: [0, 1, 2, 3].map(() => ({ titre: '', texte: '' })), groupsComp: mkGroups() },
   ecrit: skill(),
-  conj: { diffs: ['', '', ''], marks: {}, groups: mkGroups(), remed: '' }
+  conj: { diffs: ['', '', ''], marks: {}, groups: mkGroups(), remed: '', unite: '', perf: '' }
 });
 
 // complète un état ancien/incomplet avec les valeurs par défaut (compat. versions futures)
@@ -167,6 +168,12 @@ function preSelect(g, sid, i) {
   return `<select data-b="${g}|pre|${sid}">${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
 }
 
+// choix de l'unité (1 à 4) + performance attendue (champ libre) pour chaque activité
+const unitPerfHtml = g => `<div class="card"><label class="f"><span>Unité</span>
+  <select data-b="${g}|unite"><option value="">–</option>${[1, 2, 3, 4].map(u =>
+    `<option value="${u}" ${String(getP(g + '|unite')) === String(u) ? 'selected' : ''}>Unité ${u}</option>`).join('')}</select></label>
+  ${field('Performance attendue', g + '|perf', { ta: 1, rows: 3 })}</div>`;
+
 function gridHtml(g) {
   const cfg = GRIDS[g], cells = cellsOf(cfg);
   if (!S.students.length) return '<p class="hint">Ajoutez d’abord les élèves.</p>';
@@ -175,7 +182,7 @@ function gridHtml(g) {
   const nMin = cells.filter(c => c.min).length, nPerf = cells.length - nMin;
   const head1 = `<tr><th class="sticky" rowspan="3">Élève</th>${cfg.pre ? `<th rowspan="3">${preLab}</th>` : ''}
     ${nMin ? `<th class="min" colspan="${nMin}">Critères minimaux</th>` : ''}${nPerf ? `<th class="perf" colspan="${nPerf}">Perfectionnement</th>` : ''}
-    <th rowspan="3">Total<br>/${cfg.total}</th></tr>`;
+    <th rowspan="3">Total<br>/${cfg.total}</th><th rowspan="3">Niveau</th></tr>`;
   const head2 = '<tr>' + cfg.crit.map(cr => {
     const span = cr.cells ? cr.cells.length : 1, mx = cr.cells ? cr.cells.reduce((a, b) => a + b, 0) : cr.max;
     return `<th class="${cr.min ? 'min' : 'perf'}" colspan="${span}">${cr.name || cr.c}<br>${fmt(mx)}</th>`;
@@ -183,14 +190,16 @@ function gridHtml(g) {
   const head3 = '<tr>' + cells.map(c => `<th class="${c.min ? 'min' : 'perf'}">${c.lab ? c.lab + '<br>' : ''}${fmt(c.max)}</th>`).join('') + '</tr>';
   const rows = S.students.map((s, i) => {
     const r = S[g].sc[s.id] || {};
+    const lv = (S[g].lvl || {})[s.id] || '';
     return `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${cfg.pre ? `<td>${preSelect(g, s.id, i)}</td>` : ''}` +
       cells.map(c => `<td><input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`).join('') +
-      `<td class="tot" data-calc="rt" data-g="${g}" data-sid="${s.id}"></td></tr>`;
+      `<td class="tot" data-calc="rt" data-g="${g}" data-sid="${s.id}"></td>` +
+      `<td><select data-b="${g}|lvl|${s.id}"><option value="">–</option>${LEVELS.map(l => `<option value="${l}" ${lv === l ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`;
   }).join('');
   const foot = `<tr><td class="sticky">Moyenne</td>${cfg.pre ? '<td></td>' : ''}` +
     cells.map(c => `<td data-calc="ca" data-g="${g}" data-k="${c.key}" data-max="${c.max}"></td>`).join('') +
-    `<td class="tot" data-calc="ga" data-g="${g}"></td></tr>`;
-  return `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
+    `<td class="tot" data-calc="ga" data-g="${g}"></td><td></td></tr>`;
+  return unitPerfHtml(g) + `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
     <p class="hint">Saisissez les points obtenus (la valeur est plafonnée au barème de chaque indicateur). Totaux et moyennes sont calculés automatiquement.</p>`;
 }
 
@@ -279,7 +288,7 @@ const SECTIONS = {
   conj: { icon: '🔤', title: 'Conjugaison · Grammaire · Orthographe', sub: 'Difficultés & % de réussite', tabs: [
     ['Difficultés', () => {
       const d = [0, 1, 2];
-      return `<div class="card">${d.map(i => field('Difficulté n°' + (i + 1), `conj|diffs|${i}`, { ta: 1, rows: 2 })).join('')}</div>
+      return unitPerfHtml('conj') + `<div class="card">${d.map(i => field('Difficulté n°' + (i + 1), `conj|diffs|${i}`, { ta: 1, rows: 2 })).join('')}</div>
       <div class="scroll"><table><thead><tr><th class="sticky">Élève</th>${d.map(i => `<th>Diff. ${i + 1}</th>`).join('')}</tr></thead><tbody>
       ${S.students.map((s, i) => `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${d.map(k => {
         const m = (S.conj.marks[s.id] || {})['d' + k] || '';
@@ -524,6 +533,7 @@ function gridModel(g) {
   if (nMin) h1.push({ c: 'Critères minimaux', colSpan: nMin });
   if (nPerf) h1.push({ c: 'Perfectionnement', colSpan: nPerf, kind: 'perf' });
   h1.push({ c: `Total\n/${cfg.total}`, rowSpan: 3 });
+  h1.push({ c: 'Niveau', rowSpan: 3 });
   const h2 = cfg.crit.map(cr => {
     const span = cr.cells ? cr.cells.length : 1, mx = cr.cells ? cr.cells.reduce((a, b) => a + b, 0) : cr.max;
     return { c: `${cr.name || cr.c}\n${fmt(mx)}`, colSpan: span, kind: cr.min ? '' : 'perf' };
@@ -535,12 +545,12 @@ function gridModel(g) {
     const t = rowTotal(g, s.id);
     return [stuLabel(s, i), ...(cfg.pre ? [cur] : []),
       ...cells.map(c => { const v = num(r[c.key]); return v == null ? '' : fmt(Math.min(Math.max(v, 0), c.max)); }),
-      t == null ? '' : fmt(t)];
+      t == null ? '' : fmt(t), (S[g].lvl || {})[s.id] || ''];
   });
   let ts = 0, tn = 0;
   for (const st of S.students) { const x = rowTotal(g, st.id); if (x != null) { ts += x; tn++; } }
   const foot = [['Moyenne', ...(cfg.pre ? [''] : []),
-    ...cells.map(c => { const v = colAvg(g, c.key, c.max); return v == null ? '' : fmt(v); }), tn ? fmt(ts / tn) : '']];
+    ...cells.map(c => { const v = colAvg(g, c.key, c.max); return v == null ? '' : fmt(v); }), tn ? fmt(ts / tn) : '', '']];
   return { t: 'table', head: [h1, h2, h3], body, foot, firstW: 34 };
 }
 const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
@@ -556,6 +566,8 @@ function buildModel(sel) {
   const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
   const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
   const G4 = ['noms', 'crit', 'diff', 'dec'];
+  // unité + performance attendue de l'activité
+  const UP = (g, noPerf) => { if (S[g].unite) KV('Unité', 'Unité ' + S[g].unite); if (!noPerf) KV('Performance attendue', S[g].perf); };
 
   if (sel.includes('couv')) {
     H1('CAHIER D’ÉVALUATION — ' + m.classe);
@@ -572,6 +584,7 @@ function buildModel(sel) {
   }
   if (sel.includes('recit')) {
     H1('Récitation — grille /5');
+    UP('recit');
     KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
     B.push(gridModel('recit'));
     H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
@@ -579,6 +592,7 @@ function buildModel(sel) {
   if (sel.includes('oral')) {
     const o = S.oral;
     H1('Expression orale — 5ème année');
+    UP('oral', true);
     KV('Performance attendue', o.perf);
     o.obj.forEach((x, i) => KV('Objectif spécifique ' + (i + 1), x));
     KV('Structure', o.structure); KV('Lexique', o.lexique);
@@ -591,6 +605,7 @@ function buildModel(sel) {
   if (sel.includes('lect')) {
     const l = S.lect;
     H1('Lecture — grille /20');
+    UP('lect');
     l.textes.forEach((t, i) => { if ((t.titre || t.texte || '').trim()) { KV(`Texte N°${i + 1}` + (t.titre ? ' — ' + t.titre : ''), t.texte || ' '); } });
     H2('Grille d’évaluation'); B.push(gridModel('lect'));
     ERR('lect');
@@ -601,6 +616,7 @@ function buildModel(sel) {
   if (sel.includes('ecrit')) {
     const e = S.ecrit;
     H1('Production écrite — grille /20');
+    UP('ecrit');
     B.push(gridModel('ecrit'));
     ERR('ecrit');
     H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
@@ -609,6 +625,7 @@ function buildModel(sel) {
   if (sel.includes('conj')) {
     const c = S.conj, d = [0, 1, 2];
     H1('Conjugaison · Grammaire · Orthographe');
+    UP('conj');
     d.forEach(i => KV('Difficulté n°' + (i + 1), c.diffs[i]));
     const pct = k => { let ok = 0, tot = 0; for (const st of S.students) { const v = (c.marks[st.id] || {})[k]; if (v === 'ok') { ok++; tot++; } else if (v === 'ko') tot++; } return tot ? Math.round(100 * ok / tot) + ' %' : ''; };
     B.push({ t: 'table', align: 'center', firstW: 40,
