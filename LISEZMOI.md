@@ -16,6 +16,11 @@ Totaux et moyennes sont calculés automatiquement. Les données sont enregistré
   partage (enregistrer, Drive, WhatsApp, imprimer…). Le PDF reprend la police (sans-serif, serif ou machine),
   la taille et la couleur principale choisies. Il ne contient que des caractères latins (français).
 
+- **Détection des erreurs par IA** : dans l'onglet « Erreurs » de l'expression orale, de la lecture et de la production écrite,
+  choisissez un élève, collez son texte (ou prenez la copie en photo) et touchez « Analyser ». L'IA ajoute au tableau les erreurs
+  classées selon les critères de l'activité (à vérifier et à corriger si besoin). Il faut une clé API Anthropic, saisie dans
+  « ⚙ Clé API » et gardée sur l'appareil seulement. Le nom de l'élève n'est jamais envoyé. Le modèle se change dans `AI_MODEL` (haut de la section IA de `www/app.js`).
+
 ## Obtenir l'APK (sans installer Android Studio) — environ 20 minutes
 
 ### 1. Créer le projet cloud (Firebase, gratuit)
