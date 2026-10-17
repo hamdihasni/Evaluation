@@ -146,6 +146,15 @@ function colAvg(g, key, max) {
   }
   return n ? t / n : null;
 }
+// élèves ayant atteint le niveau minimal (-++ ou +++) pour un critère
+function lvStats(g, c) {
+  let n = 0, tot = 0;
+  for (const st of S.students) {
+    const v = critLv(g, st.id, c); if (!v) continue;
+    tot++; if (v === '-++' || v === '+++') n++;
+  }
+  return { n, tot };
+}
 function refresh() {
   document.querySelectorAll('[data-calc]').forEach(el => {
     const t = el.dataset.calc; let v = null;
@@ -158,6 +167,9 @@ function refresh() {
       let ok = 0, tot = 0;
       for (const st of S.students) { const m = (S.conj.marks[st.id] || {})[el.dataset.d]; if (m === 'ok') { ok++; tot++; } else if (m === 'ko') tot++; }
       el.textContent = tot ? Math.round(100 * ok / tot) + ' %' : ''; return;
+    } else if (t === 'lvn' || t === 'lvp') {
+      const { n, tot } = lvStats(el.dataset.g, el.dataset.c);
+      el.textContent = !tot ? '' : (t === 'lvn' ? n : Math.round(100 * n / tot) + ' %'); return;
     } else if (t === 'cnt') {
       const k = el.dataset.k;
       el.textContent = k === 'all' ? S.students.filter(s => s.nom.trim()).length : S.students.filter(s => s.sexe === k).length; return;
@@ -195,20 +207,23 @@ function gridHtml(g) {
   const cfg = GRIDS[g], cells = cellsOf(cfg);
   if (!S.students.length) return '<p class="hint">Ajoutez d’abord les élèves.</p>';
   const preLab = { poeme: 'Poème', situ: 'Situation', texte: 'Texte' }[cfg.pre];
-  // en-têtes : Élève | (Poème/Situation/Texte) | Niveau | Niveau par critère
+  // en-têtes : Élève | (Poème/Situation/Texte) | Niveau par critère
   const head1 = `<tr><th class="sticky" rowspan="2">Élève</th>${cfg.pre ? `<th rowspan="2">${preLab}</th>` : ''}
-    <th rowspan="2">Niveau</th><th class="lvl" colspan="${cfg.crit.length}">Niveau par critère</th></tr>`;
+    <th class="lvl" colspan="${cfg.crit.length}">Niveau par critère</th></tr>`;
   const head2 = '<tr>' + cfg.crit.map(cr => `<th class="lvl">${cr.name || cr.c}</th>`).join('') + '</tr>';
   const rows = S.students.map((s, i) => {
-    const lv = (S[g].lvl || {})[s.id] || '';
     return `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${cfg.pre ? `<td>${preSelect(g, s.id, i)}</td>` : ''}` +
-      `<td><select data-b="${g}|lvl|${s.id}"><option value="">–</option>${lvOpts(lv)}</select></td>` +
       cfg.crit.map(cr => `<td><select class="lvsel" data-b="${g}|clv|${s.id}|${cr.c}">${lvOpts(critLv(g, s.id, cr.c))}</select></td>`).join('') + '</tr>';
   }).join('');
+  const sp = cfg.pre ? 2 : 1;
+  const foot = `<tr><td class="sticky flab" colspan="${sp}">Élèves ayant atteint les critères minimaux</td>` +
+    cfg.crit.map(cr => `<td data-calc="lvn" data-g="${g}" data-c="${cr.c}"></td>`).join('') + '</tr>' +
+    `<tr><td class="sticky flab" colspan="${sp}">%</td>` +
+    cfg.crit.map(cr => `<td data-calc="lvp" data-g="${g}" data-c="${cr.c}"></td>`).join('') + '</tr>';
   const legend = cfg.crit.some(cr => cr.t) ? `<details class="card" style="padding:8px 12px"><summary><b>Critères d’évaluation</b></summary>
     ${cfg.crit.filter(cr => cr.t).map(cr => `<p style="margin:6px 0"><b>${cr.c} - ${esc(cr.t)}</b> <span class="hint">(${cr.min ? 'minimal' : 'perfectionnement'})</span><br>${esc(cr.d)}</p>`).join('')}</details>` : '';
-  return unitPerfHtml(g) + legend + `<div class="scroll"><table><thead>${head1}${head2}</thead><tbody>${rows}</tbody></table></div>
-    <p class="hint">Choisissez le niveau (---, --+, -++, +++) de chaque élève, globalement et pour chaque critère.</p>`;
+  return unitPerfHtml(g) + legend + `<div class="scroll"><table><thead>${head1}${head2}</thead><tbody>${rows}</tbody><tfoot class="lvfoot">${foot}</tfoot></table></div>
+    <p class="hint">Choisissez le niveau (---, --+, -++, +++) de chaque élève pour chaque critère. Les lignes du bas comptent les élèves ayant atteint le niveau minimal (-++ ou +++) et donnent le pourcentage parmi les élèves évalués.</p>`;
 }
 
 function errorsHtml(g) {
@@ -231,13 +246,19 @@ function errorsHtml(g) {
   <button class="btn" data-act="adderr" data-g="${g}">+ Ajouter une erreur</button></div>`;
 }
 
-function groupsHtml(path, title, labels, fields) {
+function groupsHtml(path, title, labels, fields, g) {
   const F = { noms: 'Noms et prénoms', crit: 'Critères non maîtrisés', diff: 'Difficultés à traiter', dec: 'Décisions de remédiation' };
   const arr = getP(path);
+  const stuOpts = S.students.map((s, i) => s.nom.trim()).filter(Boolean);
+  const critOpts = g === 'conj'
+    ? [0, 1, 2].map(i => { const t = String((S.conj.diffs || [])[i] || '').trim(); return 'Difficulté ' + (i + 1) + (t ? ' : ' + t.slice(0, 50) : ''); })
+    : GRIDS[g].crit.map(critLabel);
+  const picker = (f, i, label, opts) => `<select class="addsel" data-add="${path}|${i}|${f}" aria-label="${esc(label)}">
+    <option value="">＋ ${esc(label)}</option>${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
   return `<div class="card"><h3>${esc(title)}</h3>
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
     ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${labels[i]}</b></summary>
-      ${fields.map(f => `<label class="f"><span>${F[f]}</span><textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}</details>`).join('')}</div>`;
+      ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? picker(f, i, 'Choisir un élève', stuOpts) : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}</details>`).join('')}</div>`;
 }
 
 const remedHtml = (path, title) => `<div class="card"><h3>${esc(title)}</h3>${field('Situation détaillée', path, { ta: 1, rows: 10 })}</div>`;
@@ -269,7 +290,7 @@ const SECTIONS = {
   recit: { icon: '🎭', title: 'Récitation', sub: 'Grille · mise en train', tabs: [
     ['Grille', () => `<div class="card"><div class="row2">${field('Module d’évaluation N°', 'recit|module')}<div></div></div>
       ${field('Poème 1', 'recit|poemes|P1')}${field('Poème 2', 'recit|poemes|P2')}</div>${gridHtml('recit')}`],
-    ['Mise en train', () => groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'])]] },
+    ['Mise en train', () => groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'recit')]] },
 
   oral: { icon: '🗣️', title: 'Expression orale', sub: 'Fiche · grille', tabs: [
     ['Fiche', () => `<div class="card"><h3>Expression orale — 5ème année</h3>
@@ -280,21 +301,21 @@ const SECTIONS = {
       ${[0, 1, 2].map(i => `<div class="card"><h3>Épreuve d’évaluation n°${i + 1}</h3>${field('Objectifs de communication + lexique et structures à employer par l’élève + questions proposées', `oral|epr|${i}`, { ta: 1, rows: 6 })}</div>`).join('')}`],
     ['Grille', () => gridHtml('oral')],
     ['Erreurs', () => errorsHtml('oral')],
-    ['Bilan', () => groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'])]] },
+    ['Bilan', () => groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'oral')]] },
 
   lect: { icon: '📖', title: 'Lecture', sub: 'Grille · vocale & compréhension', tabs: [
     ['Textes', () => S.lect.textes.map((t, i) => `<div class="card"><h3>Texte N°${i + 1} proposé à la lecture vocale</h3>
       ${field('Titre', `lect|textes|${i}|titre`)}${field('Texte', `lect|textes|${i}|texte`, { ta: 1, rows: 7 })}</div>`).join('')],
     ['Grille', () => gridHtml('lect')],
     ['Erreurs', () => errorsHtml('lect')],
-    ['Bilans', () => groupsHtml('lect|groups', 'Résultats en lecture vocale', GROUPS_4, ['noms', 'crit', 'diff', 'dec']) +
-      groupsHtml('lect|groupsComp', 'Résultats en lecture compréhension', GROUPS_4, ['noms', 'crit', 'diff', 'dec'])],
+    ['Bilans', () => groupsHtml('lect|groups', 'Résultats en lecture vocale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect') +
+      groupsHtml('lect|groupsComp', 'Résultats en lecture compréhension', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect')],
     ['Remédiation', () => remedHtml('lect|remed', 'Dispositif de remédiation de la lecture')]] },
 
   ecrit: { icon: '✍️', title: 'Production écrite', sub: 'Grille', tabs: [
     ['Grille', () => gridHtml('ecrit')],
     ['Erreurs', () => errorsHtml('ecrit')],
-    ['Bilan', () => groupsHtml('ecrit|groups', 'Résultats à l’écrit', GROUPS_4, ['noms', 'crit', 'diff', 'dec'])],
+    ['Bilan', () => groupsHtml('ecrit|groups', 'Résultats à l’écrit', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'ecrit')],
     ['Remédiation', () => remedHtml('ecrit|remed', 'Dispositif de remédiation de la production')]] },
 
   conj: { icon: '🔤', title: 'Conjugaison · Grammaire · Orthographe', sub: 'Difficultés & % de réussite', tabs: [
@@ -309,7 +330,7 @@ const SECTIONS = {
       <tfoot><tr><td class="sticky">% de réussite</td>${d.map(k => `<td data-calc="cp" data-d="d${k}"></td>`).join('')}</tr></tfoot></table></div>
       <p class="hint">Touchez une case : ✓ (réussi) → ✗ (non réussi) → vide.</p>`;
     }],
-    ['Bilan', () => groupsHtml('conj|groups', 'Résultats des élèves', GROUPS_ABCD, ['noms', 'crit', 'dec']) +
+    ['Bilan', () => groupsHtml('conj|groups', 'Résultats des élèves', GROUPS_ABCD, ['noms', 'crit', 'dec'], 'conj') +
       remedHtml('conj|remed', 'Dispositif de remédiation (conjugaison / grammaire / orthographe)')]] }
 };
 const HOME_ORDER = ['couv', 'eleves', 'recit', 'oral', 'lect', 'ecrit', 'conj'];
@@ -541,15 +562,18 @@ function gridModel(g) {
   const preLab = { poeme: 'Poème', situ: 'Situation', texte: 'Texte' }[cfg.pre];
   const h1 = [{ c: 'Élève', rowSpan: 2 }];
   if (cfg.pre) h1.push({ c: preLab, rowSpan: 2 });
-  h1.push({ c: 'Niveau', rowSpan: 2 });
   h1.push({ c: 'Niveau par critère', colSpan: cfg.crit.length });
   const h2 = cfg.crit.map(cr => ({ c: cr.name || cr.c }));
   const body = S.students.map((s, i) => {
     const cur = S[g].pre[s.id] ?? (g === 'recit' ? (i % 2 ? 'P2' : 'P1') : '');
     return [stuLabel(s, i), ...(cfg.pre ? [cur] : []),
-      lvCell((S[g].lvl || {})[s.id] || ''), ...cfg.crit.map(cr => lvCell(critLv(g, s.id, cr.c)))];
+      ...cfg.crit.map(cr => lvCell(critLv(g, s.id, cr.c)))];
   });
-  return { t: 'table', head: [h1, h2], body, firstW: 34 };
+  const sp = cfg.pre ? 2 : 1, st = cfg.crit.map(cr => lvStats(g, cr.c));
+  const foot = [
+    [{ c: 'Élèves ayant atteint les critères minimaux', colSpan: sp }, ...st.map(x => (x.tot ? String(x.n) : ''))],
+    [{ c: '%', colSpan: sp }, ...st.map(x => (x.tot ? Math.round(100 * x.n / x.tot) + ' %' : ''))]];
+  return { t: 'table', head: [h1, h2], body, foot, firstW: 34 };
 }
 const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
   head: [['Nom et prénom', 'Erreur', 'Critère concerné', 'Type de l’erreur', 'Hypothèses explicatives']],
@@ -667,7 +691,18 @@ document.addEventListener('input', e => {
   setP(t.dataset.b, v); changed(); refresh();
 });
 document.addEventListener('change', e => {
-  const t = e.target; if (!t.dataset || !t.dataset.b) return;
+  const t = e.target;
+  if (t && t.dataset && t.dataset.add) {
+    const v = t.value; if (!v) return;
+    const path = t.dataset.add, isName = path.endsWith('|noms');
+    const cur = String(getP(path) || '').trim();
+    const items = cur.split(isName ? /\s*,\s*|\n/ : /\n/).map(x => x.trim()).filter(Boolean);
+    if (!items.includes(v)) { setP(path, cur ? cur + (isName ? ', ' : '\n') + v : v); changed(); }
+    const ta = [...document.querySelectorAll('textarea[data-b]')].find(x => x.dataset.b === path);
+    if (ta) ta.value = getP(path);
+    t.value = ''; return;
+  }
+  if (!t || !t.dataset || !t.dataset.b) return;
   if (t.dataset.max !== undefined && t.value !== '') {
     const n = Math.min(Math.max(num(t.value) ?? 0, 0), +t.dataset.max);
     t.value = n; setP(t.dataset.b, n); changed(); refresh();
