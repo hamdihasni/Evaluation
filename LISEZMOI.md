@@ -16,10 +16,14 @@ Totaux et moyennes sont calculés automatiquement. Les données sont enregistré
   partage (enregistrer, Drive, WhatsApp, imprimer…). Le PDF reprend la police (sans-serif, serif ou machine),
   la taille et la couleur principale choisies. Il ne contient que des caractères latins (français).
 
-- **Détection des erreurs par IA** : dans l'onglet « Erreurs » de l'expression orale, de la lecture et de la production écrite,
-  choisissez un élève, collez son texte (ou prenez la copie en photo) et touchez « Analyser ». L'IA ajoute au tableau les erreurs
-  classées selon les critères de l'activité (à vérifier et à corriger si besoin). Il faut une clé API Anthropic, saisie dans
-  « ⚙ Clé API » et gardée sur l'appareil seulement. Le nom de l'élève n'est jamais envoyé. Le modèle se change dans `AI_MODEL` (haut de la section IA de `www/app.js`).
+- **Détection automatique des erreurs** (gratuite, sans clé ni compte) : dans l'onglet « Erreurs » de l'expression orale, de la lecture
+  et de la production écrite, choisissez un élève, collez son texte et touchez « Détecter les erreurs ». Le service public LanguageTool
+  relève les fautes d'orthographe, de grammaire et de ponctuation, qui sont ajoutées au tableau avec le critère de l'activité
+  (correspondance modifiable dans `LT_MAP` de `www/app.js`). Internet est nécessaire ; le nom de l'élève n'est jamais envoyé.
+  Limites du service gratuit : environ 20 envois par minute et 20 000 caractères par envoi.
+  Pour une erreur saisie à la main, le bouton « 🤖 Compléter » renseigne le critère, le type et l'hypothèse manquants.
+  Dans les bilans, « 🤖 Suggérer difficultés et remédiation » remplit « Difficultés à traiter » et « Décisions de remédiation »
+  à partir des critères non maîtrisés du groupe et des erreurs de ses élèves (règles dans `SUG_REM` de `www/app.js`, à adapter).
 
 ## Obtenir l'APK (sans installer Android Studio) — environ 20 minutes
 
