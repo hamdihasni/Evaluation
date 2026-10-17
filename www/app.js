@@ -33,6 +33,8 @@ const GRIDS = {
     { c: 'C6', t: 'Richesse du vocabulaire', d: 'Utilisation de mots variés et adaptés.', min: 1, max: 1.5 },
     { c: 'C7', t: 'Présentation matérielle', d: 'Copie propre, sans rature ni surcharge, avec un espacement correct des mots.', min: 0, max: 1 }] }
 };
+// signe de niveau pour le PDF (coloré : rouge pour --- et --+, vert pour -++ et +++)
+const lvCell = v => (v ? { c: v, lv: 1 } : '');
 const critLabel = cr => (cr.t ? `${cr.c} - ${cr.t}` : (cr.name || cr.c));
 const cellsOf = g => g.crit.flatMap(cr => cr.cells
   ? cr.cells.map((m, i) => ({ key: `${cr.c}_${i + 1}`, lab: 'I' + (i + 1), max: m, min: cr.min }))
@@ -569,7 +571,7 @@ function gridModel(g) {
     const t = rowTotal(g, s.id);
     return [stuLabel(s, i), ...(cfg.pre ? [cur] : []),
       ...cells.map(c => { const v = num(r[c.key]); return v == null ? '' : fmt(Math.min(Math.max(v, 0), c.max)); }),
-      t == null ? '' : fmt(t), (S[g].lvl || {})[s.id] || '', ...cfg.crit.map(cr => critLv(g, s.id, cr.c))];
+      t == null ? '' : fmt(t), lvCell((S[g].lvl || {})[s.id] || ''), ...cfg.crit.map(cr => lvCell(critLv(g, s.id, cr.c)))];
   });
   let ts = 0, tn = 0;
   for (const st of S.students) { const x = rowTotal(g, st.id); if (x != null) { ts += x; tn++; } }
