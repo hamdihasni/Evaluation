@@ -10,18 +10,30 @@ const GRIDS = {
     { c: 'C1', min: 1, cells: [1, .5, .5] }, { c: 'C2', min: 1, cells: [.5, .5] },
     { c: 'C3', min: 1, cells: [.5, .5, .5] }, { c: 'C4', min: 0, cells: [.25, .25] }] },
   oral: { total: 15, pre: 'situ', crit: [
-    { c: 'C1', min: 1, cells: [1, 1, 1] }, { c: 'C2', min: 1, cells: [1, 1, 1] },
-    { c: 'C3', min: 1, cells: [1, 1, 1] }, { c: 'C4', min: 1, cells: [1, 1, 1] },
-    { c: 'C5', min: 1, cells: [1, 1] }, { c: 'C6', min: 0, cells: [.5, .25, .25] }] },
+    { c: 'C1', t: 'Adéquation', d: 'Respect de la tâche demandée et du sujet.', min: 1, cells: [1, 1, 1] },
+    { c: 'C2', t: 'Phonétique', d: 'Correction de la prononciation, de l’articulation et de l’intonation.', min: 1, cells: [1, 1, 1] },
+    { c: 'C3', t: 'Linguistique', d: 'Correction de la syntaxe et des structures de phrases utilisées.', min: 1, cells: [1, 1, 1] },
+    { c: 'C4', t: 'Cohérence', d: 'Enchaînement logique et compréhensible des idées.', min: 1, cells: [1, 1, 1] },
+    { c: 'C5', t: 'Perfectionnement', d: 'Aisance, richesse lexicale et dépassement des normes minimales.', min: 0, cells: [1, 1] },
+    { c: 'C6', t: 'Perfectionnement', d: 'Aisance, richesse lexicale et dépassement des normes minimales.', min: 0, cells: [.5, .25, .25] }] },
   lect: { total: 20, pre: 'texte', crit: [
-    { c: 'C1', min: 1, cells: [1, 1, 1] }, { c: 'C2', min: 1, max: 4.5 }, { c: 'C3', min: 1, max: 3 },
-    { c: 'C4', min: 1, max: 3 }, { c: 'C5', min: 1, max: 3 }, { c: 'C6', min: 1, max: 2 },
+    { c: 'C1', t: 'Lecture vocale', d: 'Qualité de la voix et respect de la continuité du texte.', min: 1, cells: [1, 1, 1] },
+    { c: 'C2', t: 'Lecture globale', d: 'Saisie du sens global et des informations explicites.', min: 1, max: 4.5 },
+    { c: 'C3', t: 'Vocabulaire', d: 'Compréhension du sens des mots dans le contexte.', min: 1, max: 3 },
+    { c: 'C4', t: 'Justification', d: 'Capacité à prouver ses réponses en s’appuyant sur le texte.', min: 1, max: 3 },
+    { c: 'C5', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 3 },
+    { c: 'C6', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 2 },
     { c: 'Voc', name: 'Lec.Voc', min: 0, max: .75 }, { c: 'Comp', name: 'Lec.Comp', min: 0, max: .75 }] },
   ecrit: { total: 20, pre: null, crit: [
-    { c: 'C1', min: 1, max: 3 }, { c: 'C2', min: 1, max: 1.5 }, { c: 'C3', min: 1, max: 6 },
-    { c: 'C4', min: 1, max: 4 }, { c: 'C5', min: 1, max: 3 }, { c: 'C6', min: 1, max: 1.5 },
-    { c: 'C7', min: 0, max: 1 }] }
+    { c: 'C1', t: 'Adéquation de la production', d: 'Respect de la consigne, du type de texte et de la situation de communication.', min: 1, max: 3 },
+    { c: 'C2', t: 'Lisibilité', d: 'Écriture claire et compréhensible.', min: 1, max: 1.5 },
+    { c: 'C3', t: 'Correction linguistique', d: 'Agencement correct des mots, respect des accords et des formes verbales étudiées, emploi de la ponctuation forte.', min: 1, max: 6 },
+    { c: 'C4', t: 'Orthographe', d: 'Maîtrise de l’orthographe lexicale et grammaticale.', min: 1, max: 4 },
+    { c: 'C5', t: 'Cohérence sémantique', d: 'Progression logique du texte sans contradictions.', min: 1, max: 3 },
+    { c: 'C6', t: 'Richesse du vocabulaire', d: 'Utilisation de mots variés et adaptés.', min: 1, max: 1.5 },
+    { c: 'C7', t: 'Présentation matérielle', d: 'Copie propre, sans rature ni surcharge, avec un espacement correct des mots.', min: 0, max: 1 }] }
 };
+const critLabel = cr => (cr.t ? `${cr.c} - ${cr.t}` : (cr.name || cr.c));
 const cellsOf = g => g.crit.flatMap(cr => cr.cells
   ? cr.cells.map((m, i) => ({ key: `${cr.c}_${i + 1}`, lab: 'I' + (i + 1), max: m, min: cr.min }))
   : [{ key: cr.c, lab: '', max: cr.max, min: cr.min }]);
@@ -29,6 +41,9 @@ const cellsOf = g => g.crit.flatMap(cr => cr.cells
 const GROUPS_4 = ['Groupe 1', 'Groupe 2', 'Groupe 3', 'Groupe 4'];
 const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 const LEVELS = ['---', '--+', '-++', '+++'];
+// niveau par critère : S[g].clv[idÉlève][critère] (ex. S.lect.clv.s1.C2)
+const critLv = (g, sid, c) => (((S[g].clv || {})[sid]) || {})[c] || '';
+const lvOpts = cur => `<option value="">–</option>${LEVELS.map(l => `<option value="${l}" ${cur === l ? 'selected' : ''}>${l}</option>`).join('')}`;
 
 /* =====================================================================
    2. ÉTAT
@@ -36,7 +51,7 @@ const LEVELS = ['---', '--+', '-++', '+++'];
 const LS1 = 'dossier5.local.v1', LS2 = 'dossier5.local.v2';
 const mkStudents = n => Array.from({ length: n }, (_, i) => ({ id: 's' + (i + 1), nom: '', naiss: '', sexe: '' }));
 const mkGroups = () => Array.from({ length: 4 }, () => ({ noms: '', crit: '', diff: '', dec: '' }));
-const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '', unite: '', perf: '', lvl: {} });
+const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '', unite: '', perf: '', lvl: {}, clv: {} });
 
 const defaultState = () => ({
   v: 1, updatedAt: 0,
@@ -182,11 +197,11 @@ function gridHtml(g) {
   const nMin = cells.filter(c => c.min).length, nPerf = cells.length - nMin;
   const head1 = `<tr><th class="sticky" rowspan="3">Élève</th>${cfg.pre ? `<th rowspan="3">${preLab}</th>` : ''}
     ${nMin ? `<th class="min" colspan="${nMin}">Critères minimaux</th>` : ''}${nPerf ? `<th class="perf" colspan="${nPerf}">Perfectionnement</th>` : ''}
-    <th rowspan="3">Total<br>/${cfg.total}</th><th rowspan="3">Niveau</th></tr>`;
+    <th rowspan="3">Total<br>/${cfg.total}</th><th rowspan="3">Niveau</th><th class="lvl" colspan="${cfg.crit.length}">Niveau par critère</th></tr>`;
   const head2 = '<tr>' + cfg.crit.map(cr => {
     const span = cr.cells ? cr.cells.length : 1, mx = cr.cells ? cr.cells.reduce((a, b) => a + b, 0) : cr.max;
     return `<th class="${cr.min ? 'min' : 'perf'}" colspan="${span}">${cr.name || cr.c}<br>${fmt(mx)}</th>`;
-  }).join('') + '</tr>';
+  }).join('') + cfg.crit.map(cr => `<th class="lvl" rowspan="2">${cr.name || cr.c}</th>`).join('') + '</tr>';
   const head3 = '<tr>' + cells.map(c => `<th class="${c.min ? 'min' : 'perf'}">${c.lab ? c.lab + '<br>' : ''}${fmt(c.max)}</th>`).join('') + '</tr>';
   const rows = S.students.map((s, i) => {
     const r = S[g].sc[s.id] || {};
@@ -194,12 +209,15 @@ function gridHtml(g) {
     return `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${cfg.pre ? `<td>${preSelect(g, s.id, i)}</td>` : ''}` +
       cells.map(c => `<td><input class="n" type="number" step="any" inputmode="decimal" data-max="${c.max}" data-b="${g}|sc|${s.id}|${c.key}" value="${esc(r[c.key] ?? '')}"></td>`).join('') +
       `<td class="tot" data-calc="rt" data-g="${g}" data-sid="${s.id}"></td>` +
-      `<td><select data-b="${g}|lvl|${s.id}"><option value="">–</option>${LEVELS.map(l => `<option value="${l}" ${lv === l ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`;
+      `<td><select data-b="${g}|lvl|${s.id}"><option value="">–</option>${lvOpts(lv)}</select></td>` +
+      cfg.crit.map(cr => `<td><select class="lvsel" data-b="${g}|clv|${s.id}|${cr.c}">${lvOpts(critLv(g, s.id, cr.c))}</select></td>`).join('') + '</tr>';
   }).join('');
   const foot = `<tr><td class="sticky">Moyenne</td>${cfg.pre ? '<td></td>' : ''}` +
     cells.map(c => `<td data-calc="ca" data-g="${g}" data-k="${c.key}" data-max="${c.max}"></td>`).join('') +
-    `<td class="tot" data-calc="ga" data-g="${g}"></td><td></td></tr>`;
-  return unitPerfHtml(g) + `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
+    `<td class="tot" data-calc="ga" data-g="${g}"></td><td></td>${cfg.crit.map(() => '<td></td>').join('')}</tr>`;
+  const legend = cfg.crit.some(cr => cr.t) ? `<details class="card" style="padding:8px 12px"><summary><b>Critères d’évaluation</b></summary>
+    ${cfg.crit.filter(cr => cr.t).map(cr => `<p style="margin:6px 0"><b>${cr.c} - ${esc(cr.t)}</b> <span class="hint">(${cr.min ? 'minimal' : 'perfectionnement'})</span><br>${esc(cr.d)}</p>`).join('')}</details>` : '';
+  return unitPerfHtml(g) + legend + `<div class="scroll"><table><thead>${head1}${head2}${head3}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
     <p class="hint">Saisissez les points obtenus (la valeur est plafonnée au barème de chaque indicateur). Totaux et moyennes sont calculés automatiquement.</p>`;
 }
 
@@ -212,7 +230,11 @@ function errorsHtml(g) {
     <label class="f"><span>Nom & prénom (élève)</span><input list="dl-stu" data-b="${g}|err|${i}|eleve" value="${esc(e.eleve)}"></label>
     <label class="f"><span>Erreur</span><textarea rows="2" data-b="${g}|err|${i}|erreur">${esc(e.erreur)}</textarea></label>
     <div class="row2">
-      <label class="f"><span>Critère concerné</span><input data-b="${g}|err|${i}|crit" value="${esc(e.crit)}"></label>
+      <label class="f"><span>Critère concerné</span><select data-b="${g}|err|${i}|crit"><option value="">–</option>${(() => {
+        const opts = GRIDS[g].crit.map(critLabel);
+        if (e.crit && !opts.includes(e.crit)) opts.push(e.crit);   // garde une ancienne saisie libre
+        return opts.map(o => `<option value="${esc(o)}" ${e.crit === o ? 'selected' : ''}>${esc(o)}</option>`).join('');
+      })()}</select></label>
       <label class="f"><span>Type de l’erreur</span><input list="dl-type" data-b="${g}|err|${i}|type" value="${esc(e.type)}"></label></div>
     <label class="f"><span>Hypothèses explicatives sur la source de l’erreur</span><textarea rows="2" data-b="${g}|err|${i}|hyp">${esc(e.hyp)}</textarea></label>
     <button class="btn red sm" data-act="delerr" data-g="${g}" data-i="${i}">Supprimer</button></div>`).join('') || '<p class="hint">Aucune erreur enregistrée.</p>'}
@@ -534,10 +556,12 @@ function gridModel(g) {
   if (nPerf) h1.push({ c: 'Perfectionnement', colSpan: nPerf, kind: 'perf' });
   h1.push({ c: `Total\n/${cfg.total}`, rowSpan: 3 });
   h1.push({ c: 'Niveau', rowSpan: 3 });
+  h1.push({ c: 'Niveau par critère', colSpan: cfg.crit.length });
   const h2 = cfg.crit.map(cr => {
     const span = cr.cells ? cr.cells.length : 1, mx = cr.cells ? cr.cells.reduce((a, b) => a + b, 0) : cr.max;
     return { c: `${cr.name || cr.c}\n${fmt(mx)}`, colSpan: span, kind: cr.min ? '' : 'perf' };
   });
+  cfg.crit.forEach(cr => h2.push({ c: cr.name || cr.c, rowSpan: 2 }));
   const h3 = cells.map(c => ({ c: (c.lab ? c.lab + '\n' : '') + fmt(c.max), kind: c.min ? '' : 'perf' }));
   const body = S.students.map((s, i) => {
     const r = S[g].sc[s.id] || {};
@@ -545,12 +569,12 @@ function gridModel(g) {
     const t = rowTotal(g, s.id);
     return [stuLabel(s, i), ...(cfg.pre ? [cur] : []),
       ...cells.map(c => { const v = num(r[c.key]); return v == null ? '' : fmt(Math.min(Math.max(v, 0), c.max)); }),
-      t == null ? '' : fmt(t), (S[g].lvl || {})[s.id] || ''];
+      t == null ? '' : fmt(t), (S[g].lvl || {})[s.id] || '', ...cfg.crit.map(cr => critLv(g, s.id, cr.c))];
   });
   let ts = 0, tn = 0;
   for (const st of S.students) { const x = rowTotal(g, st.id); if (x != null) { ts += x; tn++; } }
   const foot = [['Moyenne', ...(cfg.pre ? [''] : []),
-    ...cells.map(c => { const v = colAvg(g, c.key, c.max); return v == null ? '' : fmt(v); }), tn ? fmt(ts / tn) : '', '']];
+    ...cells.map(c => { const v = colAvg(g, c.key, c.max); return v == null ? '' : fmt(v); }), tn ? fmt(ts / tn) : '', '', ...cfg.crit.map(() => '')]];
   return { t: 'table', head: [h1, h2, h3], body, foot, firstW: 34 };
 }
 const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
@@ -566,14 +590,14 @@ function buildModel(sel) {
   const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
   const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
   const G4 = ['noms', 'crit', 'diff', 'dec'];
+  const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
+    H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
   // unité + performance attendue de l'activité
   const UP = (g, noPerf) => { if (S[g].unite) KV('Unité', 'Unité ' + S[g].unite); if (!noPerf) KV('Performance attendue', S[g].perf); };
 
   if (sel.includes('couv')) {
-    H1('CAHIER D’ÉVALUATION — ' + m.classe);
-    KV('Direction régionale de l’enseignement', m.dre); KV('Circonscription (langue française)', m.circ);
-    KV('École primaire', m.ecole); KV('Classe', m.classe); KV('Année scolaire', m.annee);
-    KV('Enseignant(e)', m.enseignant); KV('L’inspecteur', m.inspecteur); KV('L’assistant pédagogique', m.assistant);
+    B.push({ t: 'cover', dre: m.dre, circ: m.circ, ecole: m.ecole, classe: m.classe, annee: m.annee,
+      enseignant: m.enseignant, inspecteur: m.inspecteur, assistant: m.assistant });
   }
   if (sel.includes('eleves')) {
     H1('Liste des élèves — ' + m.classe + ' — ' + m.annee);
@@ -598,7 +622,7 @@ function buildModel(sel) {
     KV('Structure', o.structure); KV('Lexique', o.lexique);
     o.sit.forEach((x, i) => KV('Situation S' + (i + 1), x));
     o.epr.forEach((x, i) => KV('Épreuve d’évaluation n°' + (i + 1), x));
-    H2('Grille d’évaluation /15'); B.push(gridModel('oral'));
+    CRIT('oral'); H2('Grille d’évaluation /15'); B.push(gridModel('oral'));
     ERR('oral');
     H2('Résultats en expression orale'); B.push(grpModel(o.groups, GROUPS_4, G4));
   }
@@ -607,7 +631,7 @@ function buildModel(sel) {
     H1('Lecture — grille /20');
     UP('lect');
     l.textes.forEach((t, i) => { if ((t.titre || t.texte || '').trim()) { KV(`Texte N°${i + 1}` + (t.titre ? ' — ' + t.titre : ''), t.texte || ' '); } });
-    H2('Grille d’évaluation'); B.push(gridModel('lect'));
+    CRIT('lect'); H2('Grille d’évaluation'); B.push(gridModel('lect'));
     ERR('lect');
     H2('Résultats en lecture vocale'); B.push(grpModel(l.groups, GROUPS_4, G4));
     H2('Résultats en lecture compréhension'); B.push(grpModel(l.groupsComp, GROUPS_4, G4));
@@ -617,7 +641,7 @@ function buildModel(sel) {
     const e = S.ecrit;
     H1('Production écrite — grille /20');
     UP('ecrit');
-    B.push(gridModel('ecrit'));
+    CRIT('ecrit'); B.push(gridModel('ecrit'));
     ERR('ecrit');
     H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
     KV('Dispositif de remédiation de la production', e.remed);
