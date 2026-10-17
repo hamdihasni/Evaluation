@@ -21,17 +21,95 @@ const clean = s => String(s ?? '')
   .replace(/[^\n\r\t\x20-\x7E\u00A1-\u00FF]/g, '?');
 
 export async function exportPdf(model, o) {
-  const doc = new jsPDF({ orientation: o.orientation === 'portrait' ? 'portrait' : 'landscape', unit: 'mm', format: 'a4' });
-  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const orient = o.orientation === 'portrait' ? 'portrait' : 'landscape';
+  const firstCover = !!(model.blocks[0] && model.blocks[0].t === 'cover');
+  // la page de couverture est toujours en portrait ; les autres pages suivent le choix de l'utilisateur
+  const doc = new jsPDF({ orientation: firstCover ? 'portrait' : orient, unit: 'mm', format: 'a4' });
+  const dimsOf = ori => (ori === 'portrait' ? [210, 297] : [297, 210]);
+  const dims = [];
+  let [W, H] = dimsOf(firstCover ? 'portrait' : orient);
+  dims.push({ W, H, cover: firstCover });
   const M = 12, font = o.font || 'helvetica';
   const base = Math.min(16, Math.max(8, 10 * (o.scale || 1)));      // pt
   const PT = 0.3528;                                                // mm par point
   const pri = rgb(o.colors.pri), ink = rgb(o.colors.ink), soft = mixW(rgb(o.colors.pri2), .14);
   const onPri = lum(pri) > .45 ? [17, 24, 39] : [255, 255, 255];
   let y = M;
+  const newPage = ori => {
+    ori = ori || orient; doc.addPage('a4', ori);
+    [W, H] = dimsOf(ori); dims.push({ W, H, cover: false }); y = M;
+  };
 
   doc.setProperties({ title: clean(model.title) });
-  const ensure = h => { if (y + h > H - M - 6) { doc.addPage(); y = M; } };
+  const ensure = h => { if (y + h > H - M - 6) newPage(); };
+
+
+  // ---------- page de couverture (modèle du cahier papier) ----------
+  const PURPLE = [112, 48, 160], RED = [226, 38, 28], DRED = [176, 30, 24], GREY = [128, 128, 128];
+  function rainbow(h) {      // h de 0 (rouge) à .75 (violet)
+    const f = n => { const k = (n + h * 6) % 6; return Math.round(255 * (.86 - .86 * .86 * Math.max(0, Math.min(k, 4 - k, 1)))); };
+    return [f(5), f(3), f(1)];
+  }
+  function drawCover(c) {
+    const cx = W / 2, up = t => clean(t).toUpperCase();
+    const fit = (txt, fnt, st, size, maxW) => {      // réduit la taille pour tenir dans maxW
+      doc.setFont(fnt, st); doc.setFontSize(size);
+      const w = doc.getTextWidth(txt);
+      if (w > maxW) { size = size * maxW / w; doc.setFontSize(size); }
+      return size;
+    };
+    const center = (txt, x, yy, fnt, st, size, col, maxW) => {
+      txt = clean(txt); fit(txt, fnt, st, size, maxW || W - 40); doc.setTextColor(...col);
+      doc.text(txt, x, yy, { align: 'center' }); return doc.getTextWidth(txt);
+    };
+    // cadre de la page
+    doc.setDrawColor(170, 170, 170); doc.setLineWidth(.4); doc.rect(8, 8, W - 16, H - 16);
+    // en-têtes gauche / droite
+    ['Direction Régionale', 'De l\'enseignement', 'De ' + (c.dre || '')].forEach((t, i) =>
+      center(t, 50, 28 + i * 7.2, 'times', 'bold', 11, [0, 0, 0], 70));
+    const circL = ['CIRCONSCRIPTION', up(c.circ || ''), 'POUR LA LANGUE', 'FRANCAISE'];
+    circL.forEach((t, i) => {
+      const w = center(t, 161, 27 + i * 6, 'times', 'bold', 11, [0, 0, 0], 70);
+      if (i === 1 && t) { doc.setDrawColor(0, 0, 0); doc.setLineWidth(.3); doc.line(161 - w / 2, 27 + i * 6 + 1, 161 + w / 2, 27 + i * 6 + 1); }
+    });
+    // école
+    center('ECOLE PRIMAIRE ' + (String(c.ecole || '').trim() ? up(c.ecole) : '..........................'), cx, 59, 'helvetica', 'bold', 14, PURPLE);
+    // titre
+    center('CAHIER D\'EVALUATION', cx, 76, 'times', 'bold', 42, RED, W - 36);
+    // classe : 5 ème A  (« ème » en exposant)
+    {
+      const m = String(c.classe || '').trim().match(/^(\d+)\s*(ème|eme|ère|ere|er|e)?\s*(.*)$/i);
+      const big = 32;
+      if (m) {
+        const num = clean(m[1]), sup = clean(m[2] || ''), rest = clean(m[3] || '');
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(big); const w1 = doc.getTextWidth(num);
+        doc.setFontSize(big * .55); const w2 = sup ? doc.getTextWidth(sup) + 1.5 : 0;
+        doc.setFontSize(big); const w3 = rest ? doc.getTextWidth(' ' + rest) : 0;
+        let x = cx - (w1 + w2 + w3) / 2; doc.setTextColor(0, 0, 0);
+        doc.setFontSize(big); doc.text(num, x, 100); x += w1 + 1;
+        if (sup) { doc.setFontSize(big * .55); doc.text(sup, x, 94.5); x += w2 - 1; }
+        if (rest) { doc.setFont('helvetica', 'bold'); doc.setFontSize(big); doc.text(' ' + rest, x, 100); }
+      } else center(c.classe || '', cx, 100, 'helvetica', 'bold', big, [0, 0, 0]);
+    }
+    // prénom et nom de l'enseignant(e) en couleurs
+    {
+      const txt = clean(String(c.enseignant || '').trim() || 'Prénom et Nom');
+      const size = fit(txt, 'helvetica', 'bold', 44, W - 50);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(size);
+      const chars = [...txt], ws = chars.map(ch => doc.getTextWidth(ch)), tot = ws.reduce((a, b) => a + b, 0);
+      let x = cx - tot / 2;
+      chars.forEach((ch, i) => { doc.setTextColor(...rainbow(.75 * i / Math.max(1, chars.length - 1))); doc.text(ch, x, 136); x += ws[i]; });
+    }
+    // inspecteur / assistant pédagogique
+    center('L\'INSPECTEUR', cx, 172, 'helvetica', 'bold', 17, [0, 0, 0]);
+    center(c.inspecteur || '', cx, 187, 'helvetica', 'bold', 26, DRED, W - 36);
+    center('L\'assistant pédagogique', cx, 203, 'helvetica', 'bold', 14, [0, 0, 0]);
+    center(c.assistant || '', cx, 220, 'helvetica', 'bold', 26, DRED, W - 36);
+    // année scolaire
+    center(c.annee || '', cx, 243, 'helvetica', 'bold', 32, PURPLE);
+    // bas de page
+    center('CIRCONSCRIPTION ' + up(c.circ || '') + ' POUR LA LANGUE FRANCAISE', cx, 273, 'times', 'bold', 9.5, GREY, W - 40);
+  }
 
   function heading(text, lvl) {
     const size = lvl === 1 ? base * 1.7 : base * 1.2, lh = size * PT * 1.25;
@@ -80,7 +158,8 @@ export async function exportPdf(model, o) {
   }
 
   for (const b of model.blocks) {
-    if (b.t === 'h1') { if (b.newPage && y > M) { doc.addPage(); y = M; } heading(b.text, 1); }
+    if (b.t === 'cover') { if (b !== model.blocks[0]) { newPage('portrait'); dims[dims.length - 1].cover = true; } drawCover(b); y = H; }
+    else if (b.t === 'h1') { if (b.newPage && y > M) newPage(); heading(b.text, 1); }
     else if (b.t === 'h2') heading(b.text, 2);
     else if (b.t === 'kv') paragraph(b.text, b.label);
     else if (b.t === 'p') paragraph(b.text);
@@ -90,6 +169,8 @@ export async function exportPdf(model, o) {
   // pied de page : école · classe · année + numéro de page
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) {
+    const d = dims[i - 1]; if (d.cover) continue;
+    const W = d.W, H = d.H;
     doc.setPage(i); doc.setFont(font, 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
     doc.text(clean(`${model.footer || ''}   -   ${i} / ${n}`), W / 2, H - 6, { align: 'center' });
   }
