@@ -226,12 +226,138 @@ function gridHtml(g) {
     <p class="hint">Choisissez le niveau (---, --+, -++, +++) de chaque élève pour chaque critère. Les lignes du bas comptent les élèves ayant atteint le niveau minimal (-++ ou +++) et donnent le pourcentage parmi les élèves évalués.</p>`;
 }
 
+/* =====================================================================
+   IA : détection automatique des erreurs selon les critères de l'activité
+   La clé API est saisie par l'enseignant(e) et reste sur l'appareil (jamais synchronisée).
+   Le nom de l'élève n'est jamais envoyé : seuls le texte, la photo et les critères partent.
+   ===================================================================== */
+const AI_MODEL = 'claude-sonnet-5-5';
+const AI_KEY_LS = 'dossier5.aikey';
+const AI_CTX = {
+  oral: 'expression orale (le texte fourni est la transcription de ce que l’élève a dit)',
+  lect: 'lecture (le texte fourni est la transcription de la lecture à voix haute de l’élève et/ou de ses réponses aux questions de compréhension)',
+  ecrit: 'production écrite (le texte fourni est la production écrite de l’élève)'
+};
+const ERR_TYPES = ['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'];
+const aiDraft = {};
+const aiD = g => (aiDraft[g] ||= { sid: '', text: '', ref: '', img: '', busy: false, msg: '', ok: false });
+
+function aiCardHtml(g) {
+  const d = aiD(g), hasKey = !!localStorage.getItem(AI_KEY_LS);
+  const stu = S.students.map((s, i) => `<option value="${s.id}" ${d.sid === s.id ? 'selected' : ''}>${esc(stuLabel(s, i))}</option>`).join('');
+  return `<div class="card aicard"><h3>🤖 Détection automatique (IA)</h3>
+    <p class="hint">Collez le texte de l’élève ou prenez la copie en photo : l’IA relève les erreurs selon les critères de cette activité et les ajoute au tableau ci-dessous. Le nom de l’élève n’est jamais envoyé ; cachez-le sur la photo et ne l’écrivez pas dans le texte. Vérifiez toujours les résultats.</p>
+    ${hasKey ? '' : '<p class="hint"><b>Clé API non configurée</b> : touchez « ⚙ Clé API » pour l’enregistrer.</p>'}
+    <label class="f"><span>Élève</span><select data-ai="${g}|sid"><option value="">–</option>${stu}</select></label>
+    <label class="f"><span>Production de l’élève (texte ou transcription)</span><textarea rows="5" data-ai="${g}|text">${esc(d.text)}</textarea></label>
+    <label class="f"><span>Consigne ou texte de référence (facultatif)</span><textarea rows="2" data-ai="${g}|ref">${esc(d.ref)}</textarea></label>
+    <div class="stack"><label class="btn sec sm">📷 Photo de la copie<input type="file" accept="image/*" data-aifile="${g}" hidden></label>
+      ${d.img ? `<button class="btn red sm" data-act="aiimgdel" data-g="${g}">Retirer la photo</button>` : ''}</div>
+    ${d.img ? `<img class="aithumb" src="${d.img}" alt="Photo de la copie">` : ''}
+    <div class="msg ${d.ok ? 'ok' : ''}" id="ai-msg-${g}">${esc(d.msg)}</div>
+    <div class="stack"><button class="btn" data-act="aianalyse" data-g="${g}">Analyser et détecter les erreurs</button>
+      <button class="btn sec sm" data-act="aikey">⚙ Clé API</button></div></div>`;
+}
+
+function aiKeyModal() {
+  const has = !!localStorage.getItem(AI_KEY_LS);
+  modal(`<h2>Intelligence artificielle</h2>
+    <p class="hint">Entrez votre clé API Anthropic (console.anthropic.com). Elle est enregistrée sur cet appareil uniquement. Le texte et les photos analysés sont envoyés à Anthropic ; le nom de l’élève n’est jamais envoyé. L’utilisation est facturée sur votre compte Anthropic.</p>
+    <label class="f"><span>Clé API</span><input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+    <div class="msg" id="ai-key-msg">${has ? 'Une clé est déjà enregistrée.' : ''}</div>
+    <div class="stack"><button class="btn" data-act="aisavekey">Enregistrer</button>
+      ${has ? '<button class="btn red sm" data-act="aidelkey">Supprimer la clé</button>' : ''}
+      <button class="btn sec" data-act="closemodal">Fermer</button></div>`);
+}
+
+// réduit la photo (1600 px max, JPEG) pour limiter le poids envoyé
+const aiShrink = file => new Promise((ok, ko) => {
+  const r = new FileReader();
+  r.onerror = () => ko(new Error('Lecture de la photo impossible.'));
+  r.onload = () => {
+    const im = new Image();
+    im.onerror = () => ko(new Error('Photo illisible.'));
+    im.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+      const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      ok(c.toDataURL('image/jpeg', .85));
+    };
+    im.src = r.result;
+  };
+  r.readAsDataURL(file);
+});
+
+async function aiCall(g, d, key) {
+  const crit = GRIDS[g].crit.map(cr => `- ${cr.c} : ${cr.t || cr.name || cr.c}${cr.d ? ' — ' + cr.d : ''} (${cr.min ? 'critère minimal' : 'perfectionnement'})`).join('\n');
+  const system = 'Tu es un assistant pédagogique pour un(e) enseignant(e) de français de 5ème année de l’enseignement primaire (Tunisie, élèves d’environ 10-11 ans). ' +
+    'Tu analyses la production d’un élève et tu relèves ses erreurs réelles, classées selon les critères d’évaluation de l’activité. ' +
+    'Règles : ne signale que de vraies erreurs, sans en inventer ; cite l’extrait fautif exact puis la correction attendue ; rattache chaque erreur à UN critère de la liste (son code) ; ' +
+    'choisis le type parmi : ' + ERR_TYPES.join(', ') + ' ; propose une hypothèse brève et bienveillante sur la source de l’erreur ; regroupe les erreurs identiques ; ' +
+    '15 erreurs au maximum, les plus significatives d’abord. Si une photo est fournie, transcris-la fidèlement, sans corriger, dans "transcription". ' +
+    'Réponds UNIQUEMENT par un objet JSON, sans aucun texte autour : {"transcription":"","erreurs":[{"critere":"C1","erreur":"…","type":"…","hypothese":"…"}]}';
+  const text = `Activité : ${AI_CTX[g]}.\nCritères d’évaluation :\n${crit}\n` +
+    (d.ref.trim() ? `\nConsigne / texte de référence :\n${d.ref.trim()}\n` : '') +
+    (d.text.trim() ? `\nProduction de l’élève :\n${d.text.trim()}` : '\nLa production de l’élève est sur la photo jointe.');
+  const content = [];
+  if (d.img) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d.img.split(',')[1] } });
+  content.push({ type: 'text', text });
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: AI_MODEL, max_tokens: 3000, system, messages: [{ role: 'user', content }] })
+    });
+  } catch (e) { throw new Error('Pas de connexion internet.'); }
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Clé API invalide : vérifiez-la dans « ⚙ Clé API ».');
+    if (res.status === 429) throw new Error('Trop de demandes : réessayez dans un instant.');
+    throw new Error('Erreur du service IA (' + res.status + ').');
+  }
+  const data = await res.json();
+  const raw = (data.content || []).map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
+  try { return JSON.parse(raw); } catch (e) {
+    const m = raw.match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch (e2) { /* ignore */ } }
+    throw new Error('Réponse de l’IA illisible : réessayez.');
+  }
+}
+
+async function aiAnalyse(g) {
+  const d = aiD(g);
+  const setMsg = (m, ok) => { d.msg = m; d.ok = !!ok; const el = $('#ai-msg-' + g); if (el) { el.textContent = m; el.className = 'msg ' + (ok ? 'ok' : ''); } };
+  const key = localStorage.getItem(AI_KEY_LS);
+  if (!key) return aiKeyModal();
+  const idx = S.students.findIndex(s => s.id === d.sid);
+  if (idx < 0) return setMsg('Choisissez d’abord un élève.');
+  if (!d.text.trim() && !d.img) return setMsg('Saisissez le texte de l’élève ou ajoutez une photo.');
+  if (d.busy) return;
+  d.busy = true; setMsg('Analyse en cours… (quelques secondes)');
+  try {
+    const out = await aiCall(g, d, key);
+    const name = S.students[idx].nom.trim() || ('E' + (idx + 1));
+    const crits = GRIDS[g].crit;
+    const list = (Array.isArray(out.erreurs) ? out.erreurs : []).slice(0, 15).map(x => {
+      const cr = crits.find(c => c.c === String(x.critere || '').trim());
+      return { eleve: name, erreur: String(x.erreur || '').slice(0, 400), crit: cr ? critLabel(cr) : '',
+        type: ERR_TYPES.includes(x.type) ? x.type : 'Autre', hyp: String(x.hypothese || '').slice(0, 400), ia: 1 };
+    }).filter(x => x.erreur);
+    if (out.transcription && !d.text.trim()) d.text = String(out.transcription);
+    S[g].err.push(...list);
+    d.busy = false;
+    if (list.length) changed();
+    d.msg = list.length ? `${list.length} erreur(s) ajoutée(s) au tableau ci-dessous : vérifiez-les.` : 'Aucune erreur détectée.';
+    d.ok = true;
+    render(true);
+  } catch (e) { d.busy = false; setMsg(String((e && e.message) || e)); }
+}
+
 function errorsHtml(g) {
   const list = S[g].err;
-  return `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
+  return aiCardHtml(g) + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
   <div class="card"><h3>Recensement et classification des erreurs</h3>
-  ${list.map((e, i) => `<div class="errcard">
+  ${list.map((e, i) => `<div class="errcard">${e.ia ? '<p class="hint" style="margin:0 0 6px">🤖 Détectée par l’IA — à vérifier</p>' : ''}
     <label class="f"><span>Nom & prénom (élève)</span><input list="dl-stu" data-b="${g}|err|${i}|eleve" value="${esc(e.eleve)}"></label>
     <label class="f"><span>Erreur</span><textarea rows="2" data-b="${g}|err|${i}|erreur">${esc(e.erreur)}</textarea></label>
     <div class="row2">
@@ -745,6 +871,15 @@ document.addEventListener('click', async e => {
     while (k < names.length) S.students.push({ id: 's' + Date.now().toString(36) + k, nom: names[k++], naiss: '', sexe: '' });
     changed(); return render(true);
   }
+  if (a === 'aikey') return aiKeyModal();
+  if (a === 'aisavekey') {
+    const v = ($('#ai-key').value || '').trim(), m = $('#ai-key-msg');
+    if (!/^sk-ant-/.test(v)) { m.textContent = 'Cette clé ne semble pas valide (elle commence par sk-ant-).'; return; }
+    localStorage.setItem(AI_KEY_LS, v); modal(''); return render(true);
+  }
+  if (a === 'aidelkey') { localStorage.removeItem(AI_KEY_LS); modal(''); return render(true); }
+  if (a === 'aianalyse') return aiAnalyse(el.dataset.g);
+  if (a === 'aiimgdel') { aiD(el.dataset.g).img = ''; return render(true); }
   if (a === 'adderr') { S[el.dataset.g].err.push({ eleve: '', erreur: '', crit: '', type: '', hyp: '' }); changed(); return render(true); }
   if (a === 'delerr') { S[el.dataset.g].err.splice(+el.dataset.i, 1); changed(); return render(true); }
   if (a === 'tog') {
@@ -755,6 +890,16 @@ document.addEventListener('click', async e => {
   }
 });
 
+document.addEventListener('input', e => {
+  const t = e.target; if (!t.dataset || !t.dataset.ai) return;
+  const [g, f] = t.dataset.ai.split('|'); aiD(g)[f] = t.value;
+});
+document.addEventListener('change', async e => {
+  const t = e.target; if (!t.dataset || !t.dataset.aifile) return;
+  const g = t.dataset.aifile, f = t.files && t.files[0]; if (!f) return;
+  try { aiD(g).img = await aiShrink(f); aiD(g).msg = ''; render(true); }
+  catch (err) { const el = $('#ai-msg-' + g); if (el) { el.textContent = String(err.message || err); el.className = 'msg'; } }
+});
 document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.pref) return;
   const k = t.dataset.pref;
