@@ -227,129 +227,209 @@ function gridHtml(g) {
 }
 
 /* =====================================================================
-   IA : détection automatique des erreurs selon les critères de l'activité
-   La clé API est saisie par l'enseignant(e) et reste sur l'appareil (jamais synchronisée).
-   Le nom de l'élève n'est jamais envoyé : seuls le texte, la photo et les critères partent.
+   DÉTECTION AUTOMATIQUE DES ERREURS (gratuite, sans clé ni compte)
+   Utilise le service public LanguageTool (correcteur orthographe/grammaire français).
+   Seul le texte saisi est envoyé : le nom de l'élève n'est jamais transmis.
+   Les erreurs sont rattachées aux critères de l'activité selon LT_MAP.
    ===================================================================== */
-const AI_MODEL = 'claude-sonnet-5-5';
-const AI_KEY_LS = 'dossier5.aikey';
-const AI_CTX = {
-  oral: 'expression orale (le texte fourni est la transcription de ce que l’élève a dit)',
-  lect: 'lecture (le texte fourni est la transcription de la lecture à voix haute de l’élève et/ou de ses réponses aux questions de compréhension)',
-  ecrit: 'production écrite (le texte fourni est la production écrite de l’élève)'
-};
+const LT_URL = 'https://api.languagetool.org/v2/check';
+const LT_MAX = 20000;      // limite du service gratuit par envoi
 const ERR_TYPES = ['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'];
+// nature de l'erreur -> critère de la grille (absent = ignoré pour cette activité)
+const LT_MAP = {
+  ecrit: { orth: 'C4', gram: 'C3', punct: 'C3', lex: 'C6', typo: 'C7' },
+  oral: { orth: 'C2', gram: 'C3' },
+  lect: { orth: 'C1', gram: 'C1', lex: 'C3' }
+};
+const LT_HYP = {
+  Orthographique: 'Orthographe du mot non mémorisée ou confusion entre mots proches.',
+  Phonologique: 'Mot mal prononcé, mal articulé ou mal lu.',
+  Morphologique: 'Règle d’accord ou de conjugaison non maîtrisée.',
+  Syntaxique: 'Construction de la phrase, majuscule ou ponctuation à revoir.',
+  Lexicale: 'Vocabulaire limité, répétition ou mot inadapté.',
+  Autre: 'À analyser avec l’élève.'
+};
 const aiDraft = {};
-const aiD = g => (aiDraft[g] ||= { sid: '', text: '', ref: '', img: '', busy: false, msg: '', ok: false });
+const aiD = g => (aiDraft[g] ||= { sid: '', text: '', busy: false, msg: '', ok: false });
 
 function aiCardHtml(g) {
-  const d = aiD(g), hasKey = !!localStorage.getItem(AI_KEY_LS);
+  const d = aiD(g);
   const stu = S.students.map((s, i) => `<option value="${s.id}" ${d.sid === s.id ? 'selected' : ''}>${esc(stuLabel(s, i))}</option>`).join('');
-  return `<div class="card aicard"><h3>🤖 Détection automatique (IA)</h3>
-    <p class="hint">Collez le texte de l’élève ou prenez la copie en photo : l’IA relève les erreurs selon les critères de cette activité et les ajoute au tableau ci-dessous. Le nom de l’élève n’est jamais envoyé ; cachez-le sur la photo et ne l’écrivez pas dans le texte. Vérifiez toujours les résultats.</p>
-    ${hasKey ? '' : '<p class="hint"><b>Clé API non configurée</b> : touchez « ⚙ Clé API » pour l’enregistrer.</p>'}
+  return `<div class="card aicard"><h3>🤖 Détection automatique des erreurs</h3>
+    <p class="hint">Gratuit, sans compte. Collez ou saisissez le texte de l’élève (production, transcription de sa lecture ou de sa prise de parole) : les erreurs d’orthographe, de grammaire et de ponctuation sont relevées et classées selon les critères de l’activité. Le sens, la cohérence et la compréhension restent à évaluer par vous. Le texte est envoyé au service LanguageTool (internet requis) ; le nom de l’élève n’est jamais envoyé, ne l’écrivez pas dans le texte. Vérifiez toujours les résultats.</p>
     <label class="f"><span>Élève</span><select data-ai="${g}|sid"><option value="">–</option>${stu}</select></label>
-    <label class="f"><span>Production de l’élève (texte ou transcription)</span><textarea rows="5" data-ai="${g}|text">${esc(d.text)}</textarea></label>
-    <label class="f"><span>Consigne ou texte de référence (facultatif)</span><textarea rows="2" data-ai="${g}|ref">${esc(d.ref)}</textarea></label>
-    <div class="stack"><label class="btn sec sm">📷 Photo de la copie<input type="file" accept="image/*" data-aifile="${g}" hidden></label>
-      ${d.img ? `<button class="btn red sm" data-act="aiimgdel" data-g="${g}">Retirer la photo</button>` : ''}</div>
-    ${d.img ? `<img class="aithumb" src="${d.img}" alt="Photo de la copie">` : ''}
+    <label class="f"><span>Production de l’élève</span><textarea rows="6" data-ai="${g}|text">${esc(d.text)}</textarea></label>
     <div class="msg ${d.ok ? 'ok' : ''}" id="ai-msg-${g}">${esc(d.msg)}</div>
-    <div class="stack"><button class="btn" data-act="aianalyse" data-g="${g}">Analyser et détecter les erreurs</button>
-      <button class="btn sec sm" data-act="aikey">⚙ Clé API</button></div></div>`;
+    <div class="stack"><button class="btn" data-act="aianalyse" data-g="${g}">Détecter les erreurs</button></div></div>`;
 }
 
-function aiKeyModal() {
-  const has = !!localStorage.getItem(AI_KEY_LS);
-  modal(`<h2>Intelligence artificielle</h2>
-    <p class="hint">Entrez votre clé API Anthropic (console.anthropic.com). Elle est enregistrée sur cet appareil uniquement. Le texte et les photos analysés sont envoyés à Anthropic ; le nom de l’élève n’est jamais envoyé. L’utilisation est facturée sur votre compte Anthropic.</p>
-    <label class="f"><span>Clé API</span><input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
-    <div class="msg" id="ai-key-msg">${has ? 'Une clé est déjà enregistrée.' : ''}</div>
-    <div class="stack"><button class="btn" data-act="aisavekey">Enregistrer</button>
-      ${has ? '<button class="btn red sm" data-act="aidelkey">Supprimer la clé</button>' : ''}
-      <button class="btn sec" data-act="closemodal">Fermer</button></div>`);
+// nature de l'erreur à partir de la réponse LanguageTool
+function ltKind(m) {
+  const r = m.rule || {}, rid = String(r.id || ''), cat = String((r.category && r.category.id) || ''), it = String(r.issueType || '');
+  if (rid === 'FRENCH_WHITESPACE' || /NBSP|INSECABLE/i.test(rid)) return null;   // espaces insécables : ignorés
+  if (it === 'whitespace' || /WHITESPACE|ESPACE/i.test(rid)) return 'typo';
+  if (cat === 'TYPOGRAPHY') return null;               // espaces insécables, guillemets… : sans intérêt ici
+  if (cat === 'TYPOS' || it === 'misspelling' || cat === 'COMPOUNDING') return 'orth';
+  if (/CONFUS|HOMO/i.test(rid) || cat === 'CONFUSED_WORDS') return 'orth';
+  if (cat === 'PUNCTUATION' || cat === 'CASING') return 'punct';
+  if (/STYLE|REDUND|REPET|SEMANT|BARBAR|GALLIC|NONSTANDARD/i.test(cat) || it === 'style') return 'lex';
+  return 'gram';
 }
 
-// réduit la photo (1600 px max, JPEG) pour limiter le poids envoyé
-const aiShrink = file => new Promise((ok, ko) => {
-  const r = new FileReader();
-  r.onerror = () => ko(new Error('Lecture de la photo impossible.'));
-  r.onload = () => {
-    const im = new Image();
-    im.onerror = () => ko(new Error('Photo illisible.'));
-    im.onload = () => {
-      const k = Math.min(1, 1600 / Math.max(im.width, im.height));
-      const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
-      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-      ok(c.toDataURL('image/jpeg', .85));
-    };
-    im.src = r.result;
-  };
-  r.readAsDataURL(file);
-});
-
-async function aiCall(g, d, key) {
-  const crit = GRIDS[g].crit.map(cr => `- ${cr.c} : ${cr.t || cr.name || cr.c}${cr.d ? ' — ' + cr.d : ''} (${cr.min ? 'critère minimal' : 'perfectionnement'})`).join('\n');
-  const system = 'Tu es un assistant pédagogique pour un(e) enseignant(e) de français de 5ème année de l’enseignement primaire (Tunisie, élèves d’environ 10-11 ans). ' +
-    'Tu analyses la production d’un élève et tu relèves ses erreurs réelles, classées selon les critères d’évaluation de l’activité. ' +
-    'Règles : ne signale que de vraies erreurs, sans en inventer ; cite l’extrait fautif exact puis la correction attendue ; rattache chaque erreur à UN critère de la liste (son code) ; ' +
-    'choisis le type parmi : ' + ERR_TYPES.join(', ') + ' ; propose une hypothèse brève et bienveillante sur la source de l’erreur ; regroupe les erreurs identiques ; ' +
-    '15 erreurs au maximum, les plus significatives d’abord. Si une photo est fournie, transcris-la fidèlement, sans corriger, dans "transcription". ' +
-    'Réponds UNIQUEMENT par un objet JSON, sans aucun texte autour : {"transcription":"","erreurs":[{"critere":"C1","erreur":"…","type":"…","hypothese":"…"}]}';
-  const text = `Activité : ${AI_CTX[g]}.\nCritères d’évaluation :\n${crit}\n` +
-    (d.ref.trim() ? `\nConsigne / texte de référence :\n${d.ref.trim()}\n` : '') +
-    (d.text.trim() ? `\nProduction de l’élève :\n${d.text.trim()}` : '\nLa production de l’élève est sur la photo jointe.');
-  const content = [];
-  if (d.img) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d.img.split(',')[1] } });
-  content.push({ type: 'text', text });
+// appel du service LanguageTool : renvoie la liste des fautes relevées
+async function ltCheck(text) {
   let res;
   try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: AI_MODEL, max_tokens: 3000, system, messages: [{ role: 'user', content }] })
-    });
+    res = await fetch(LT_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ text, language: 'fr' }).toString() });
   } catch (e) { throw new Error('Pas de connexion internet.'); }
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('Clé API invalide : vérifiez-la dans « ⚙ Clé API ».');
-    if (res.status === 429) throw new Error('Trop de demandes : réessayez dans un instant.');
-    throw new Error('Erreur du service IA (' + res.status + ').');
-  }
-  const data = await res.json();
-  const raw = (data.content || []).map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
-  try { return JSON.parse(raw); } catch (e) {
-    const m = raw.match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch (e2) { /* ignore */ } }
-    throw new Error('Réponse de l’IA illisible : réessayez.');
-  }
+  if (res.status === 429) throw new Error('Trop de demandes : réessayez dans une minute.');
+  if (!res.ok) throw new Error('Erreur du service (' + res.status + ').');
+  return ((await res.json()).matches) || [];
+}
+// faute LanguageTool -> erreur classée selon les critères de l'activité (null = ignorée)
+function ltEntry(g, m, text) {
+  const kind = ltKind(m), code = kind && (LT_MAP[g] || {})[kind]; if (!code) return null;
+  const cr = GRIDS[g].crit.find(c => c.c === code); if (!cr) return null;
+  const frag = text.substr(m.offset, m.length).trim();
+  const rep = ((m.replacements || [])[0] || {}).value || '';
+  const type = kind === 'orth' ? (g === 'ecrit' ? 'Orthographique' : 'Phonologique')
+    : kind === 'gram' ? (/ACCORD|AGREEMENT|CONJ|PLUR|FEM|MASC|PARTICIPE|VERB|TEMPS|PAST|INF/i.test(String((m.rule || {}).id || '')) ? 'Morphologique' : 'Syntaxique')
+    : kind === 'punct' ? 'Syntaxique' : kind === 'lex' ? 'Lexicale' : 'Autre';
+  const erreur = `« ${frag || '…'} »${rep ? ' → « ' + rep + ' »' : ''}${m.message ? ' (' + m.message + ')' : ''}`.slice(0, 400);
+  return { frag, rep, cr, type, erreur, crit: critLabel(cr), hyp: LT_HYP[type] || '' };
 }
 
 async function aiAnalyse(g) {
   const d = aiD(g);
   const setMsg = (m, ok) => { d.msg = m; d.ok = !!ok; const el = $('#ai-msg-' + g); if (el) { el.textContent = m; el.className = 'msg ' + (ok ? 'ok' : ''); } };
-  const key = localStorage.getItem(AI_KEY_LS);
-  if (!key) return aiKeyModal();
   const idx = S.students.findIndex(s => s.id === d.sid);
   if (idx < 0) return setMsg('Choisissez d’abord un élève.');
-  if (!d.text.trim() && !d.img) return setMsg('Saisissez le texte de l’élève ou ajoutez une photo.');
+  const text = d.text.slice(0, LT_MAX);
+  if (!text.trim()) return setMsg('Saisissez le texte de l’élève.');
   if (d.busy) return;
-  d.busy = true; setMsg('Analyse en cours… (quelques secondes)');
+  d.busy = true; setMsg('Analyse en cours…');
   try {
-    const out = await aiCall(g, d, key);
+    const matches = await ltCheck(text);
     const name = S.students[idx].nom.trim() || ('E' + (idx + 1));
-    const crits = GRIDS[g].crit;
-    const list = (Array.isArray(out.erreurs) ? out.erreurs : []).slice(0, 15).map(x => {
-      const cr = crits.find(c => c.c === String(x.critere || '').trim());
-      return { eleve: name, erreur: String(x.erreur || '').slice(0, 400), crit: cr ? critLabel(cr) : '',
-        type: ERR_TYPES.includes(x.type) ? x.type : 'Autre', hyp: String(x.hypothese || '').slice(0, 400), ia: 1 };
-    }).filter(x => x.erreur);
-    if (out.transcription && !d.text.trim()) d.text = String(out.transcription);
+    const seen = new Set(), list = [];
+    for (const m of matches) {
+      const en = ltEntry(g, m, text); if (!en) continue;
+      const key = (en.frag + '|' + en.rep).toLowerCase(); if (seen.has(key)) continue; seen.add(key);
+      list.push({ eleve: name, erreur: en.erreur, crit: en.crit, type: en.type, hyp: en.hyp, ia: 1 });
+      if (list.length >= 25) break;
+    }
     S[g].err.push(...list);
     d.busy = false;
     if (list.length) changed();
-    d.msg = list.length ? `${list.length} erreur(s) ajoutée(s) au tableau ci-dessous : vérifiez-les.` : 'Aucune erreur détectée.';
+    d.msg = (list.length ? `${list.length} erreur(s) ajoutée(s) au tableau ci-dessous : vérifiez-les.` : 'Aucune erreur détectée.')
+      + (d.text.length > LT_MAX ? ' (texte tronqué à 20 000 caractères)' : '');
     d.ok = true;
     render(true);
   } catch (e) { d.busy = false; setMsg(String((e && e.message) || e)); }
+}
+
+// compléter automatiquement le critère, le type et l'hypothèse d'une erreur saisie à la main
+let errBusy = false;
+async function errAuto(g, i) {
+  const e = S[g].err[i]; if (!e || errBusy) return;
+  const say = (m) => { const el = $('#errmsg-' + g + '-' + i); if (el) el.textContent = m; };
+  const text = String(e.erreur || '').trim();
+  if (!text) return say('Saisissez d’abord l’erreur de l’élève.');
+  errBusy = true; say('Analyse en cours…');
+  try {
+    const en = (await ltCheck(text.slice(0, LT_MAX))).map(m => ltEntry(g, m, text)).find(Boolean);
+    errBusy = false;
+    if (!en) return say('Aucune faute reconnue : renseignez le type à la main.');
+    if (!e.crit) e.crit = en.crit;
+    if (!e.type) e.type = en.type;
+    if (!e.hyp) e.hyp = en.hyp;
+    e.ia = 1; changed(); render(true);
+  } catch (err) { errBusy = false; say(String((err && err.message) || err)); }
+}
+
+/* ---------- Bilans : suggestion des difficultés à traiter et des décisions de remédiation ----------
+   Règles pédagogiques (sans service externe) à partir des critères non maîtrisés du groupe
+   et des erreurs enregistrées pour les élèves du groupe. Suggestions à adapter. */
+const SUG_REM = {
+  ecrit: {
+    C1: 'Relire la consigne ensemble ; repérer le type de texte et la situation de communication avant d’écrire ; proposer des modèles.',
+    C2: 'Courts exercices réguliers d’écriture (formes des lettres, liaisons, espacement des mots) ; copie soignée.',
+    C3: 'Exercices ciblés d’accords (sujet-verbe, groupe nominal) et de formes verbales étudiées ; ponctuation forte : recopier en rétablissant points et majuscules.',
+    C4: 'Dictées préparées ; mémorisation des mots fréquents ; carnet d’orthographe personnel.',
+    C5: 'Plan simple (début, milieu, fin) avant d’écrire ; repérer les contradictions dans un texte à corriger.',
+    C6: 'Banque de mots par thème ; recherche de synonymes pour éviter les répétitions.',
+    C7: 'Rappeler les consignes de présentation (marges, espaces, pas de rature) ; réécriture au propre.'
+  },
+  oral: {
+    C1: 'Reformuler la consigne avant de parler ; jeux de rôles courts pour rester dans le sujet.',
+    C2: 'Exercices d’articulation et de répétition de phrases ; écoute et imitation d’un modèle.',
+    C3: 'Reformuler les phrases erronées (par l’enseignant(e) puis par l’élève) ; réemployer des structures de phrases modèles.',
+    C4: 'Utiliser des mots de liaison (d’abord, ensuite, enfin) ; raconter à partir d’images ordonnées.',
+    C5: 'Enrichir le lexique par thème ; prises de parole plus longues en petit groupe.',
+    C6: 'Enrichir le lexique par thème ; prises de parole plus longues en petit groupe.'
+  },
+  lect: {
+    C1: 'Lectures à voix haute répétées de courts textes (en écho, par deux) ; respect de la ponctuation.',
+    C2: 'Questionner le texte (qui, où, quand, quoi) ; surligner les informations explicites.',
+    C3: 'Chercher le sens des mots dans le contexte ; classer les mots ; utiliser le dictionnaire.',
+    C4: 'Répondre en citant la phrase du texte qui le prouve (« Où l’as-tu lu ? »).',
+    C5: 'Lectures chronométrées de textes connus ; lecture expressive avec intonation.',
+    C6: 'Lectures chronométrées de textes connus ; lecture expressive avec intonation.',
+    Voc: 'Chercher le sens des mots dans le contexte ; utiliser le dictionnaire.',
+    Comp: 'Questions de compréhension guidées, de l’explicite vers l’implicite.'
+  }
+};
+const SUG_REM_TYPE = {
+  Orthographique: 'Dictées préparées et mémorisation des mots fréquents.',
+  Phonologique: 'Exercices d’articulation et lecture à voix haute des mots mal prononcés.',
+  Morphologique: 'Exercices d’accords et de conjugaison sur les formes étudiées.',
+  Syntaxique: 'Remise en ordre de phrases, reformulation, travail sur la ponctuation.',
+  Lexicale: 'Enrichissement du vocabulaire par thèmes ; recherche de synonymes.',
+  Sémantique: 'Travail sur le sens des mots et des phrases.'
+};
+const splitList = (t, names) => String(t || '').split(names ? /\s*,\s*|\n/ : /\n/).map(x => x.trim()).filter(Boolean);
+
+function sugBuild(g, gr) {
+  const names = splitList(gr.noms, true).map(n => n.toLowerCase());
+  const errs = (S[g].err || []).filter(e => names.includes(String(e.eleve || '').trim().toLowerCase()));
+  let lines = splitList(gr.crit);
+  if (!lines.length && g !== 'conj') lines = [...new Set(errs.map(e => e.crit).filter(Boolean))];   // à défaut : critères des erreurs du groupe
+  if (!lines.length && !errs.length) return null;
+  const diff = [], dec = [];
+  for (const line of lines) {
+    const cr = g === 'conj' ? null : GRIDS[g].crit.find(c => critLabel(c) === line || c.name === line || line === c.c || line.startsWith(c.c + ' '));
+    if (!cr) { diff.push(line); continue; }
+    diff.push(cr.t ? `${cr.t} — ${cr.d}` : `Critère ${critLabel(cr)} non maîtrisé.`);
+    const r = (SUG_REM[g] || {})[cr.c]; if (r && !dec.includes(r)) dec.push(r);
+  }
+  if (errs.length) {
+    const cnt = {}; errs.forEach(e => { const t = e.type || 'Autre'; cnt[t] = (cnt[t] || 0) + 1; });
+    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    diff.push(`Erreurs relevées (${errs.length}) : ` + top.map(([t, n]) => t.toLowerCase() + ' ' + n).join(', ') + '.');
+    const ex = errs.slice(0, 3).map(e => String(e.erreur || '').split('\n')[0].slice(0, 60)).filter(Boolean);
+    if (ex.length) diff.push('Exemples : ' + ex.join(' ; '));
+    top.forEach(([t]) => { const r = SUG_REM_TYPE[t]; if (r && !dec.includes(r)) dec.push(r); });
+  }
+  if (g === 'conj') dec.push('Activités de remédiation ciblées sur les difficultés ci-dessus (exercices courts, réinvestissement en production).');
+  return { diff, dec: dec.slice(0, 6) };
+}
+
+function sugApply(g, path, i, fields) {
+  const say = m => { const el = $('#sug-' + path.replace(/\|/g, '-') + '-' + i); if (el) el.textContent = m; };
+  const sug = sugBuild(g, getP(path)[i]);
+  if (!sug) return say('Renseignez d’abord les élèves ou les critères non maîtrisés du groupe (listes de choix ci-dessus).');
+  let added = 0;
+  for (const f of fields) {
+    if (f !== 'diff' && f !== 'dec') continue;
+    const fp = `${path}|${i}|${f}`, cur = splitList(getP(fp));
+    for (const l of sug[f]) if (!cur.includes(l)) { cur.push(l); added++; }
+    setP(fp, cur.join('\n'));
+    const ta = [...document.querySelectorAll('textarea[data-b]')].find(x => x.dataset.b === fp);
+    if (ta) ta.value = cur.join('\n');
+  }
+  if (added) changed();
+  say(added ? 'Suggestions ajoutées : à relire et adapter.' : 'Rien de nouveau à ajouter.');
 }
 
 function errorsHtml(g) {
@@ -357,7 +437,7 @@ function errorsHtml(g) {
   return aiCardHtml(g) + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
   <div class="card"><h3>Recensement et classification des erreurs</h3>
-  ${list.map((e, i) => `<div class="errcard">${e.ia ? '<p class="hint" style="margin:0 0 6px">🤖 Détectée par l’IA — à vérifier</p>' : ''}
+  ${list.map((e, i) => `<div class="errcard">${e.ia ? '<p class="hint" style="margin:0 0 6px">🤖 Détectée automatiquement — à vérifier</p>' : ''}
     <label class="f"><span>Nom & prénom (élève)</span><input list="dl-stu" data-b="${g}|err|${i}|eleve" value="${esc(e.eleve)}"></label>
     <label class="f"><span>Erreur</span><textarea rows="2" data-b="${g}|err|${i}|erreur">${esc(e.erreur)}</textarea></label>
     <div class="row2">
@@ -368,7 +448,9 @@ function errorsHtml(g) {
       })()}</select></label>
       <label class="f"><span>Type de l’erreur</span><input list="dl-type" data-b="${g}|err|${i}|type" value="${esc(e.type)}"></label></div>
     <label class="f"><span>Hypothèses explicatives sur la source de l’erreur</span><textarea rows="2" data-b="${g}|err|${i}|hyp">${esc(e.hyp)}</textarea></label>
-    <button class="btn red sm" data-act="delerr" data-g="${g}" data-i="${i}">Supprimer</button></div>`).join('') || '<p class="hint">Aucune erreur enregistrée.</p>'}
+    ${(!e.crit || !e.type || !e.hyp) ? `<button class="btn sec sm" data-act="errauto" data-g="${g}" data-i="${i}">🤖 Compléter critère, type et hypothèse</button> ` : ''}
+    <button class="btn red sm" data-act="delerr" data-g="${g}" data-i="${i}">Supprimer</button>
+    <div class="hint" id="errmsg-${g}-${i}"></div></div>`).join('') || '<p class="hint">Aucune erreur enregistrée.</p>'}
   <button class="btn" data-act="adderr" data-g="${g}">+ Ajouter une erreur</button></div>`;
 }
 
@@ -384,7 +466,9 @@ function groupsHtml(path, title, labels, fields, g) {
   return `<div class="card"><h3>${esc(title)}</h3>
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
     ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${labels[i]}</b></summary>
-      ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? picker(f, i, 'Choisir un élève', stuOpts) : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}</details>`).join('')}</div>`;
+      ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? picker(f, i, 'Choisir un élève', stuOpts) : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}
+      ${(fields.includes('diff') || fields.includes('dec')) ? `<div class="stack"><button class="btn sec sm" data-act="aisug" data-g="${g}" data-path="${path}" data-i="${i}" data-fields="${fields.join(',')}">🤖 Suggérer difficultés et remédiation</button></div>
+      <div class="hint" id="sug-${path.replace(/\|/g, '-')}-${i}"></div>` : ''}</details>`).join('')}</div>`;
 }
 
 const remedHtml = (path, title) => `<div class="card"><h3>${esc(title)}</h3>${field('Situation détaillée', path, { ta: 1, rows: 10 })}</div>`;
@@ -871,15 +955,9 @@ document.addEventListener('click', async e => {
     while (k < names.length) S.students.push({ id: 's' + Date.now().toString(36) + k, nom: names[k++], naiss: '', sexe: '' });
     changed(); return render(true);
   }
-  if (a === 'aikey') return aiKeyModal();
-  if (a === 'aisavekey') {
-    const v = ($('#ai-key').value || '').trim(), m = $('#ai-key-msg');
-    if (!/^sk-ant-/.test(v)) { m.textContent = 'Cette clé ne semble pas valide (elle commence par sk-ant-).'; return; }
-    localStorage.setItem(AI_KEY_LS, v); modal(''); return render(true);
-  }
-  if (a === 'aidelkey') { localStorage.removeItem(AI_KEY_LS); modal(''); return render(true); }
   if (a === 'aianalyse') return aiAnalyse(el.dataset.g);
-  if (a === 'aiimgdel') { aiD(el.dataset.g).img = ''; return render(true); }
+  if (a === 'errauto') return errAuto(el.dataset.g, +el.dataset.i);
+  if (a === 'aisug') return sugApply(el.dataset.g, el.dataset.path, +el.dataset.i, el.dataset.fields.split(','));
   if (a === 'adderr') { S[el.dataset.g].err.push({ eleve: '', erreur: '', crit: '', type: '', hyp: '' }); changed(); return render(true); }
   if (a === 'delerr') { S[el.dataset.g].err.splice(+el.dataset.i, 1); changed(); return render(true); }
   if (a === 'tog') {
@@ -893,12 +971,6 @@ document.addEventListener('click', async e => {
 document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.ai) return;
   const [g, f] = t.dataset.ai.split('|'); aiD(g)[f] = t.value;
-});
-document.addEventListener('change', async e => {
-  const t = e.target; if (!t.dataset || !t.dataset.aifile) return;
-  const g = t.dataset.aifile, f = t.files && t.files[0]; if (!f) return;
-  try { aiD(g).img = await aiShrink(f); aiD(g).msg = ''; render(true); }
-  catch (err) { const el = $('#ai-msg-' + g); if (el) { el.textContent = String(err.message || err); el.className = 'msg'; } }
 });
 document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.pref) return;
