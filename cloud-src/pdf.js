@@ -135,6 +135,10 @@ export async function exportPdf(model, o) {
     const out = { content: clean(c.c) };
     if (c.colSpan) out.colSpan = c.colSpan;
     if (c.rowSpan) out.rowSpan = c.rowSpan;
+    if (c.lv) {   // niveaux : --- et --+ en rouge, -++ / ++- et +++ en vert
+      const bad = /^-{2}/.test(String(c.c));
+      out.styles = { textColor: bad ? [200, 0, 0] : [0, 140, 40], fontStyle: 'bold' };
+    }
     if (c.kind === 'perf') out.styles = { fillColor: [180, 83, 9], textColor: [255, 255, 255] };
     return out;
   }
