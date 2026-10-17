@@ -26,9 +26,8 @@ export async function exportPdf(model, o) {
   // la page de couverture est toujours en portrait ; les autres pages suivent le choix de l'utilisateur
   const doc = new jsPDF({ orientation: firstCover ? 'portrait' : orient, unit: 'mm', format: 'a4' });
   const dimsOf = ori => (ori === 'portrait' ? [210, 297] : [297, 210]);
-  const dims = [];
+  const coverPages = new Set();   // numéros des pages de couverture (sans pied de page)
   let [W, H] = dimsOf(firstCover ? 'portrait' : orient);
-  dims.push({ W, H, cover: firstCover });
   const M = 12, font = o.font || 'helvetica';
   const base = Math.min(16, Math.max(8, 10 * (o.scale || 1)));      // pt
   const PT = 0.3528;                                                // mm par point
@@ -37,7 +36,7 @@ export async function exportPdf(model, o) {
   let y = M;
   const newPage = ori => {
     ori = ori || orient; doc.addPage('a4', ori);
-    [W, H] = dimsOf(ori); dims.push({ W, H, cover: false }); y = M;
+    [W, H] = dimsOf(ori); y = M;
   };
 
   doc.setProperties({ title: clean(model.title) });
@@ -162,7 +161,7 @@ export async function exportPdf(model, o) {
   }
 
   for (const b of model.blocks) {
-    if (b.t === 'cover') { if (b !== model.blocks[0]) { newPage('portrait'); dims[dims.length - 1].cover = true; } drawCover(b); y = H; }
+    if (b.t === 'cover') { if (b !== model.blocks[0]) newPage('portrait'); coverPages.add(doc.getNumberOfPages()); drawCover(b); y = H; }
     else if (b.t === 'h1') { if (b.newPage && y > M) newPage(); heading(b.text, 1); }
     else if (b.t === 'h2') heading(b.text, 2);
     else if (b.t === 'kv') paragraph(b.text, b.label);
@@ -173,10 +172,12 @@ export async function exportPdf(model, o) {
   // pied de page : école · classe · année + numéro de page
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) {
-    const d = dims[i - 1]; if (d.cover) continue;
-    const W = d.W, H = d.H;
+    if (coverPages.has(i)) continue;
+    // dimensions réelles de la page (autoTable peut avoir ajouté des pages lui-même)
+    let pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+    try { const mb = doc.getPageInfo(i).pageContext.mediaBox, k = doc.internal.scaleFactor; pw = mb.topRightX / k; ph = mb.topRightY / k; } catch (e) {}
     doc.setPage(i); doc.setFont(font, 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
-    doc.text(clean(`${model.footer || ''}   -   ${i} / ${n}`), W / 2, H - 6, { align: 'center' });
+    doc.text(clean(`${model.footer || ''}   -   ${i} / ${n}`), pw / 2, ph - 6, { align: 'center' });
   }
 
   const name = o.fileName || 'dossier.pdf';
