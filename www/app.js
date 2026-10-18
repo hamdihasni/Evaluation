@@ -1077,6 +1077,20 @@ function buildModel(sel) {
   const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
   const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
   const G4 = ['noms', 'crit', 'diff', 'dec'];
+  // activités de remédiation retenues (fiches du fichier-classe ou activités personnalisées)
+  const RA = g => {
+    const rows = (S[g].ra || []).filter(it => it.sel !== false).map(it => {
+      const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
+      const fiche = it.src === 'libre' ? (it.titre || 'Activité personnalisée')
+        : x ? `${REM_LABEL[x.act]}\n${remRange(x)} · p. ${x.f[0].p} · ${x.niv}ème année` : 'Fiche introuvable';
+      const files = (it.files || []).map(f => f.name).join(', ');
+      return [fiche, x ? x.os : '', (it.grp || []).join(', '), [it.note, files ? 'Fichier(s) joint(s) : ' + files : ''].filter(Boolean).join('\n')];
+    });
+    if (!rows.length) return;
+    H2('Activités de remédiation');
+    B.push({ t: 'table', align: 'left', minH: 14, firstW: 34,
+      head: [['Activité', 'Objectif spécifique', 'Groupes concernés', 'Remarques, organisation, fichiers']], body: rows });
+  };
   const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
     H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
   // unité + performance attendue de l'activité
@@ -1099,6 +1113,7 @@ function buildModel(sel) {
     KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
     B.push(gridModel('recit'));
     H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
+    RA('recit');
   }
   if (sel.includes('oral')) {
     const o = S.oral;
@@ -1112,6 +1127,7 @@ function buildModel(sel) {
     CRIT('oral'); H2('Grille d’évaluation'); B.push(gridModel('oral'));
     ERR('oral');
     H2('Résultats en expression orale'); B.push(grpModel(o.groups, GROUPS_4, G4));
+    RA('oral');
   }
   if (sel.includes('lect')) {
     const l = S.lect;
@@ -1123,6 +1139,7 @@ function buildModel(sel) {
     H2('Résultats en lecture vocale'); B.push(grpModel(l.groups, GROUPS_4, G4));
     H2('Résultats en lecture compréhension'); B.push(grpModel(l.groupsComp, GROUPS_4, G4));
     KV('Dispositif de remédiation de la lecture', l.remed);
+    RA('lect');
   }
   if (sel.includes('ecrit')) {
     const e = S.ecrit;
@@ -1132,6 +1149,7 @@ function buildModel(sel) {
     ERR('ecrit');
     H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
     KV('Dispositif de remédiation de la production', e.remed);
+    RA('ecrit');
   }
   if (sel.includes('conj')) {
     const c = S.conj, d = [0, 1, 2];
@@ -1145,6 +1163,7 @@ function buildModel(sel) {
       foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
     H2('Résultats des élèves'); B.push(grpModel(c.groups, GROUPS_ABCD, ['noms', 'crit', 'dec']));
     KV('Dispositif de remédiation', c.remed);
+    RA('conj');
   }
   return { title: 'Dossier d’évaluation — ' + m.classe, footer: [m.ecole, m.classe, m.annee].filter(Boolean).join(' · '), blocks: B };
 }
