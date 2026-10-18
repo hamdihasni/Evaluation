@@ -1084,30 +1084,33 @@ function buildModel(sel) {
   const G4 = ['noms', 'crit', 'diff', 'dec'];
   // activités de remédiation retenues (IA + saisies par l'enseignant), classées par groupe
   const RA_TITLE = { recit: 'Récitation', oral: 'Expression orale', lect: 'Lecture', ecrit: 'Production écrite', conj: 'Conjugaison · Grammaire · Orthographe' };
+  const isImg = f => /^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || '');
   const raText = it => {
     const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
     const head = it.src === 'libre' ? (it.titre || 'Activité personnalisée')
-      : x ? `${REM_LABEL[x.act]} ${remRange(x)} (p. ${x.f[0].p}, ${x.niv}ème année) : ${x.os}` : 'Fiche introuvable';
-    const files = (it.files || []).map(f => f.name).join(', ');
-    return '- ' + head + (it.note ? '\n   ' + it.note : '') + (files ? '\n   Fichier(s) joint(s) : ' + files : '');
+      : x ? `${REM_LABEL[x.act]} : ${x.os}` : 'Activité';
+    const others = (it.files || []).filter(f => !isImg(f)).map(f => f.name).join(', ');
+    return '- ' + head + (it.note ? '\n   ' + it.note : '') + (others ? '\n   Fichier(s) joint(s) : ' + others : '');
   };
+  const raImgs = its => its.flatMap(it => (it.files || []).filter(isImg).map(f => RA_IMG[f.id] && { name: f.name, ...RA_IMG[f.id] }).filter(Boolean));
   const RA = g => {
     H1('Activités de remédiation — ' + RA_TITLE[g]);
     const items = (S[g].ra || []).filter(it => it.sel !== false);
     if (!items.length) return B.push({ t: 'p', text: 'Aucune activité de remédiation retenue.' });
-    const sets = groupSets(g), rows = [], used = new Set();
+    const sets = groupSets(g), rows = [], used = new Set(), imgs = [];
     const crits = gr => splitList(gr.crit).join('\n');
     for (const st of sets) {
       const mine = items.filter(it => (it.grp || []).includes(st.label)); if (!mine.length) continue;
       mine.forEach(it => used.add(it.id));
-      rows.push([st.label, crits(st.gr), mine.map(raText).join('\n')]);
+      rows.push([st.label, crits(st.gr), mine.map(raText).join('\n')]); imgs.push([st.label, raImgs(mine)]);
     }
     // activités liées à « Toute la classe » ou à aucun groupe
     const known = new Set(sets.map(x => x.label));
     const rest = items.filter(it => !(it.grp || []).some(l => known.has(l)));
-    if (rest.length) rows.push(['Toute la classe', '', rest.map(raText).join('\n')]);
+    if (rest.length) { rows.push(['Toute la classe', '', rest.map(raText).join('\n')]); imgs.push(['Toute la classe', raImgs(rest)]); }
     B.push({ t: 'table', align: 'left', minH: 16, firstW: 26,
       head: [['Groupe', 'Critères concernés', 'Activités proposées']], body: rows });
+    for (const [lab, list] of imgs) if (list.length) B.push({ t: 'imgs', label: 'Images jointes — ' + lab, list });
   };
   const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
     H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
@@ -1182,6 +1185,30 @@ function buildModel(sel) {
   return { title: 'Dossier d’évaluation — ' + m.classe, footer: [m.ecole, m.classe, m.annee].filter(Boolean).join(' · '), blocks: B };
 }
 
+// images insérées dans les activités de remédiation : redimensionnées en JPEG pour le PDF
+const RA_IMG = {};
+async function blobJpeg(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const im = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('image illisible')); i.src = url; });
+    const k = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight)), w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(im, 0, 0, w, h);
+    return { data: c.toDataURL('image/jpeg', 0.82), w, h };
+  } finally { URL.revokeObjectURL(url); }
+}
+async function loadRaImages(sel) {
+  for (const g of ['recit', 'oral', 'lect', 'ecrit', 'conj']) {
+    if (!sel.includes('ra_' + g)) continue;
+    for (const it of (S[g].ra || [])) {
+      if (it.sel === false) continue;
+      for (const f of (it.files || [])) {
+        if (RA_IMG[f.id] || !(/^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || ''))) continue;
+        try { const b = await fGet(f.id); if (b) RA_IMG[f.id] = await blobJpeg(b); } catch (e) { /* image ignorée */ }
+      }
+    }
+  }
+}
 async function makePdf() {
   const msg = (t, ok) => { const el = $('#pdf-msg'); if (el) { el.className = 'msg' + (ok ? ' ok' : ''); el.textContent = t; } };
   const sel = PDF_SECS.map(x => x[0]).filter(k => pdfSel[k]);
@@ -1189,6 +1216,7 @@ async function makePdf() {
   const orSel = $('#pdf-or'); if (orSel) pdfOrient = orSel.value;
   msg('Génération du PDF…', true);
   try {
+    await loadRaImages(sel);
     const mod = await import('./pdf.js');
     const slug = String(S.meta.classe || 'classe').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
     await mod.exportPdf(buildModel(sel), {
