@@ -72,3 +72,31 @@ td.flab{white-space:normal;font-size:.8rem;line-height:1.2;max-width:150px}
 /* détection IA */
 .aicard{border-left:4px solid var(--pri)}
 .aithumb{display:block;max-width:100%;max-height:170px;border-radius:8px;margin:6px 0}
+
+/* accueil : un cadre de couleur différente par activité */
+.tile{border:3px solid var(--tc,var(--line));background:var(--tb,var(--card));box-shadow:0 2px 0 var(--tc,transparent)}
+.tile.alt{background:var(--tb,var(--soft,#eef2ff))}
+.tile .tt{display:block;font-weight:700}
+
+/* apparence détaillée : titres (t), sous-titres (s), tableaux (b) */
+header h1{font-family:var(--tf,inherit);font-size:var(--tz,1rem)}
+.card h2,.card h3{font-family:var(--tf,inherit);font-size:var(--tz,1rem);color:var(--tc,var(--pri))}
+.modal h2{font-family:var(--tf,inherit);font-size:var(--tz,1.5rem);color:var(--tc,var(--pri))}
+.cover .big{font-family:var(--tf,inherit);font-size:var(--tz,1.25rem);color:var(--tc,var(--pri))}
+.tile .tt{font-family:var(--tf,inherit);font-size:var(--tz,.94rem);color:var(--tc,var(--ink))}
+.f>span,.tile small{font-family:var(--sf,inherit);font-size:var(--sz,.75rem);color:var(--sc,var(--mut))}
+.hint{font-family:var(--sf,inherit);font-size:var(--sz,.81rem);color:var(--sc,var(--mut))}
+summary{font-family:var(--sf,inherit);font-size:var(--sz,1rem);color:var(--sc,var(--ink))}
+table,th,td{font-family:var(--bf,inherit);font-size:var(--bz,.81rem);color:var(--bc,inherit)}
+td.flab{font-size:var(--bz,.8rem)}
+td select,td input.n{font-size:inherit;font-family:inherit;color:inherit}
+
+/* activités de remédiation */
+.raitem.off{opacity:.55}
+.rahead{margin-bottom:2px}.raos{font-weight:600;margin:2px 0 6px}
+.rafiche{border-top:1px dashed var(--line);padding:6px 0;font-size:.88rem}
+.tag{display:inline-block;background:var(--soft,#eef2ff);color:var(--pri);border-radius:99px;padding:2px 8px;font-size:.72rem;font-weight:600;margin:0 4px 4px 0}
+.ragrp{margin:4px 0}
+.rafiles{margin:6px 0 10px}
+.rafile{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}.rafile>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.rainsert{display:inline-block;cursor:pointer}.rainsert input{display:none}

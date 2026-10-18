@@ -1,4 +1,5 @@
 import * as cloud from './cloud.js';
+import { REM, REM_LABEL } from './remediation-data.js';
 
 /* =====================================================================
    1. CONFIGURATION DES GRILLES (reprend les barèmes du cahier papier)
@@ -53,18 +54,18 @@ const lvOpts = cur => `<option value="">–</option>${LEVELS.map(l => `<option v
 const LS1 = 'dossier5.local.v1', LS2 = 'dossier5.local.v2';
 const mkStudents = n => Array.from({ length: n }, (_, i) => ({ id: 's' + (i + 1), nom: '', naiss: '', sexe: '' }));
 const mkGroups = () => Array.from({ length: 4 }, () => ({ noms: '', crit: '', diff: '', dec: '' }));
-const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '', unite: '', perf: '', lvl: {}, clv: {} });
+const skill = () => ({ sc: {}, pre: {}, err: [], groups: mkGroups(), remed: '', unite: '', perf: '', lvl: {}, clv: {}, ra: [] });
 
 const defaultState = () => ({
   v: 1, updatedAt: 0,
   meta: { dre: 'Kasserine', circ: 'Thala', ecole: '', classe: '5ème A', annee: '2026 / 2027', enseignant: '',
-    inspecteur: 'M. Moncef Zidi', assistant: 'M. Mohamed Mnasri' },
+    inspecteur: 'M. Moncef Zidi', assistant: 'M. Mohamed Mnasri', niveau: '' },
   students: mkStudents(28),
   recit: { ...skill(), module: '', poemes: { P1: '', P2: '' } },
   oral: { ...skill(), perf: '', obj: ['', '', '', ''], structure: '', lexique: '', sit: ['', '', '', ''], epr: ['', '', ''] },
   lect: { ...skill(), textes: [0, 1, 2, 3].map(() => ({ titre: '', texte: '' })), groupsComp: mkGroups() },
   ecrit: skill(),
-  conj: { diffs: ['', '', ''], marks: {}, groups: mkGroups(), remed: '', unite: '', perf: '' }
+  conj: { diffs: ['', '', ''], marks: {}, groups: mkGroups(), remed: '', unite: '', perf: '', ra: [] }
 });
 
 // complète un état ancien/incomplet avec les valeurs par défaut (compat. versions futures)
@@ -249,6 +250,65 @@ const LT_HYP = {
   Lexicale: 'Vocabulaire limité, répétition ou mot inadapté.',
   Autre: 'À analyser avec l’élève.'
 };
+// Hypothèses explicatives liées au CRITÈRE retenu par l'IA (puis affinées par le type d'erreur)
+const HYP_CRIT = {
+  ecrit: {
+    C1: { _: 'La consigne ou la situation de communication n’a pas été bien comprise : le type de texte demandé n’est pas respecté.' },
+    C2: { _: 'Geste graphique peu maîtrisé : formes des lettres, liaisons ou espacement des mots irréguliers.' },
+    C3: { Morphologique: 'Règles d’accord (sujet-verbe, groupe nominal) ou formes verbales étudiées non automatisées.',
+      Syntaxique: 'Construction de la phrase, majuscule et ponctuation forte (point) non maîtrisées.',
+      _: 'Agencement des mots, accords ou ponctuation à revoir.' },
+    C4: { Orthographique: 'Orthographe lexicale non mémorisée : mot fréquent mal retenu, graphie d’un son ou homophone confondu.',
+      Morphologique: 'Orthographe grammaticale : marque du genre, du nombre ou terminaison verbale oubliée.',
+      _: 'Orthographe lexicale ou grammaticale non maîtrisée.' },
+    C5: { _: 'Planification insuffisante : ordre des idées non respecté ou contradiction non repérée à la relecture.' },
+    C6: { Lexicale: 'Vocabulaire limité : mots répétés ou mot inadapté au contexte.', _: 'Vocabulaire peu varié ou peu adapté à la situation.' },
+    C7: { _: 'Copie peu soignée : relecture absente, espaces entre les mots ou ratures.' }
+  },
+  oral: {
+    C1: { _: 'La consigne ou le sujet n’a pas été bien compris : l’élève s’écarte de la tâche demandée.' },
+    C2: { _: 'Prononciation ou articulation : un son est mal discriminé ou mal produit, intonation peu travaillée.' },
+    C3: { Morphologique: 'Accord ou forme verbale non maîtrisés à l’oral (influence de la langue parlée à la maison).',
+      Syntaxique: 'Structure de phrase non automatisée à l’oral : ordre des mots ou mot de liaison manquant.',
+      _: 'Syntaxe et structures de phrases à consolider à l’oral.' },
+    C4: { _: 'Idées non enchaînées : manque de mots de liaison et de planification de la prise de parole.' },
+    C5: { _: 'Aisance limitée : lexique pauvre ou prise de parole hésitante.' },
+    C6: { _: 'Aisance limitée : lexique pauvre ou prise de parole hésitante.' }
+  },
+  lect: {
+    C1: { Phonologique: 'Correspondance lettres-sons à consolider : mot mal déchiffré ou mal articulé.',
+      Orthographique: 'Mot non reconnu globalement : déchiffrage hésitant.',
+      _: 'Lecture saccadée : continuité du texte et ponctuation non respectées.' },
+    C2: { _: 'Sens global du texte non saisi : informations explicites non repérées.' },
+    C3: { _: 'Sens du mot non connu dans le contexte : lexique insuffisant.' },
+    C4: { _: 'Difficulté à justifier : l’élève ne revient pas au texte pour prouver sa réponse.' },
+    C5: { _: 'Fluidité et expressivité à développer : lectures répétées de textes connus.' },
+    C6: { _: 'Fluidité et expressivité à développer : lectures répétées de textes connus.' },
+    Voc: { _: 'Sens du mot non connu dans le contexte : lexique insuffisant.' },
+    Comp: { _: 'Compréhension du texte à guider : de l’explicite vers l’implicite.' }
+  }
+};
+const critCode = (g, label) => {
+  const l = String(label || '').trim(); if (!l || !GRIDS[g]) return '';
+  const cr = GRIDS[g].crit.find(c => critLabel(c) === l || c.name === l || l === c.c || l.startsWith(c.c + ' '));
+  return cr ? cr.c : '';
+};
+// hypothèse = critère + type d'erreur (+ indice donné par le message du correcteur)
+function hypFor(g, code, type, extra) {
+  const cr = GRIDS[g] && GRIDS[g].crit.find(c => c.c === code);
+  const tbl = ((HYP_CRIT[g] || {})[code]) || {};
+  let h = tbl[type] || tbl._ || LT_HYP[type] || '';
+  const r = normTxt(extra);
+  const hint = /participe/.test(r) ? ' (accord du participe passé)'
+    : /pluriel|singulier/.test(r) ? ' (marque du pluriel)'
+    : /feminin|masculin|genre/.test(r) ? ' (accord en genre)'
+    : /sujet|conjugu|verbe/.test(r) ? ' (accord sujet-verbe / forme du verbe)'
+    : /majuscule/.test(r) ? ' (majuscule en début de phrase)'
+    : /virgule|ponctuation/.test(r) ? ' (ponctuation)' : '';
+  if (hint && !/\(/.test(h)) h = h.replace(/\.$/, '') + hint + '.';
+  return cr ? `Critère ${critLabel(cr)} : ${h}` : h;
+}
+const normTxt = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const aiDraft = {};
 const aiD = g => (aiDraft[g] ||= { sid: '', text: '', busy: false, msg: '', ok: false });
 
@@ -297,7 +357,7 @@ function ltEntry(g, m, text) {
     : kind === 'gram' ? (/ACCORD|AGREEMENT|CONJ|PLUR|FEM|MASC|PARTICIPE|VERB|TEMPS|PAST|INF/i.test(String((m.rule || {}).id || '')) ? 'Morphologique' : 'Syntaxique')
     : kind === 'punct' ? 'Syntaxique' : kind === 'lex' ? 'Lexicale' : 'Autre';
   const erreur = `« ${frag || '…'} »${rep ? ' → « ' + rep + ' »' : ''}${m.message ? ' (' + m.message + ')' : ''}`.slice(0, 400);
-  return { frag, rep, cr, type, erreur, crit: critLabel(cr), hyp: LT_HYP[type] || '' };
+  return { frag, rep, cr, type, erreur, crit: critLabel(cr), hyp: hypFor(g, cr.c, type, (m.message || '') + ' ' + ((m.rule || {}).id || '')) };
 }
 
 async function aiAnalyse(g) {
@@ -316,7 +376,7 @@ async function aiAnalyse(g) {
     for (const m of matches) {
       const en = ltEntry(g, m, text); if (!en) continue;
       const key = (en.frag + '|' + en.rep).toLowerCase(); if (seen.has(key)) continue; seen.add(key);
-      list.push({ eleve: name, erreur: en.erreur, crit: en.crit, type: en.type, hyp: en.hyp, ia: 1 });
+      list.push({ eleve: name, erreur: en.erreur, crit: en.crit, type: en.type, hyp: en.hyp, ia: 1, hypAuto: 1 });
       if (list.length >= 25) break;
     }
     S[g].err.push(...list);
@@ -343,7 +403,7 @@ async function errAuto(g, i) {
     if (!en) return say('Aucune faute reconnue : renseignez le type à la main.');
     if (!e.crit) e.crit = en.crit;
     if (!e.type) e.type = en.type;
-    if (!e.hyp) e.hyp = en.hyp;
+    if (!e.hyp) { e.hyp = hypFor(g, critCode(g, e.crit) || (en.cr && en.cr.c), e.type, en.erreur); e.hypAuto = 1; }
     e.ia = 1; changed(); render(true);
   } catch (err) { errBusy = false; say(String((err && err.message) || err)); }
 }
@@ -449,6 +509,7 @@ function errorsHtml(g) {
       <label class="f"><span>Type de l’erreur</span><input list="dl-type" data-b="${g}|err|${i}|type" value="${esc(e.type)}"></label></div>
     <label class="f"><span>Hypothèses explicatives sur la source de l’erreur</span><textarea rows="2" data-b="${g}|err|${i}|hyp">${esc(e.hyp)}</textarea></label>
     ${(!e.crit || !e.type || !e.hyp) ? `<button class="btn sec sm" data-act="errauto" data-g="${g}" data-i="${i}">🤖 Compléter critère, type et hypothèse</button> ` : ''}
+    ${critCode(g, e.crit) ? `<button class="btn sec sm" data-act="errhyp" data-g="${g}" data-i="${i}">🤖 Hypothèse selon le critère</button> ` : ''}
     <button class="btn red sm" data-act="delerr" data-g="${g}" data-i="${i}">Supprimer</button>
     <div class="hint" id="errmsg-${g}-${i}"></div></div>`).join('') || '<p class="hint">Aucune erreur enregistrée.</p>'}
   <button class="btn" data-act="adderr" data-g="${g}">+ Ajouter une erreur</button></div>`;
@@ -474,6 +535,194 @@ function groupsHtml(path, title, labels, fields, g) {
 const remedHtml = (path, title) => `<div class="card"><h3>${esc(title)}</h3>${field('Situation détaillée', path, { ta: 1, rows: 10 })}</div>`;
 
 /* =====================================================================
+   5b. ACTIVITÉS DE REMÉDIATION : fiches du fichier-classe 5ème / 6ème année
+   (catalogue extrait des PDF : www/remediation-data.js). Propositions par règles,
+   sans service externe, à partir des critères non maîtrisés et des erreurs des groupes.
+   ===================================================================== */
+const niveau = () => (S.meta.niveau === '5' || S.meta.niveau === '6' ? S.meta.niveau : (/(^|\D)6/.test(S.meta.classe || '') ? '6' : '5'));
+const rnivHtml = () => `<label class="f"><span>Niveau du fichier-classe (fiches de remédiation)</span><select data-rniv="1">
+  <option value="" ${!S.meta.niveau ? 'selected' : ''}>Automatique : ${niveau()}ème année (d’après le nom de la classe)</option>
+  <option value="5" ${S.meta.niveau === '5' ? 'selected' : ''}>5ème année</option><option value="6" ${S.meta.niveau === '6' ? 'selected' : ''}>6ème année</option></select></label>`;
+
+const STOP = new Set('dans pour avec sans leur leurs elle elles nous vous tout tous cette cela comme mais donc entre chez dont ainsi aussi tres une des les aux correctement employer utiliser consolider fonction'.split(' '));
+const stems = txt => [...new Set(normTxt(txt).split(/[^a-z]+/).filter(w => w.length >= 4 && !STOP.has(w)).map(w => w.slice(0, 5)))];
+const REM_IDX = {};
+function remSeries(niv) {
+  if (REM_IDX[niv]) return REM_IDX[niv];
+  const out = [];
+  for (const [act, list] of Object.entries(REM[niv] || {})) for (const x of list) out.push({ niv, act, n: x.n, os: x.os, f: x.f, st: new Set(stems(x.os)) });
+  return (REM_IDX[niv] = out);
+}
+const IDF = {};
+function remIdf(niv, k) {
+  const key = niv + k; if (key in IDF) return IDF[key];
+  const idx = remSeries(niv), df = idx.reduce((n, x) => n + (x.st.has(k) ? 1 : 0), 0);
+  return (IDF[key] = df ? Math.log(1 + idx.length / df) : 0);
+}
+const remGet = (niv, act, n) => remSeries(niv).find(x => x.act === act && x.n === n);
+const remRange = x => (x.f.length > 1 ? `${x.f[0].c} à ${x.f[x.f.length - 1].c}` : x.f[0].c);
+
+// quelles rubriques du fichier-classe correspondent à chaque activité / critère
+const REM_ACTS_FOR = { ecrit: ['ecrit', 'gram', 'conj', 'ortho'], conj: ['conj', 'gram', 'ortho', 'ecrit'], oral: ['gram', 'conj', 'ecrit', 'ortho'],
+  lect: ['ecrit', 'ortho', 'gram', 'conj'], recit: ['ortho', 'ecrit', 'gram', 'conj'] };
+const KW_VOC = 'vocabulaire répétitions substituts';
+const CRIT_REM = {
+  ecrit: {
+    C1: { acts: ['ecrit'], kw: 'consigne question situation communication récit dialogue description lettre vocabulaire approprié' },
+    C2: { acts: ['ecrit'], kw: 'présenter paragraphes texte narratif' },
+    C3: { acts: ['gram', 'conj'], kw: 'phrase verbe sujet accord négative types prépositions' },
+    C4: { acts: ['ortho'], kw: 'orthographier orthographe homophones accord pluriel participe graphies son' },
+    C5: { acts: ['ecrit'], kw: 'contradictions progression chronologique ordre récit marqueurs articulateurs intrus cohérence' },
+    C6: { acts: ['ecrit'], kw: KW_VOC + ' pronoms déterminants possessifs démonstratifs' },
+    C7: { acts: ['ecrit'], kw: 'présenter paragraphes' } },
+  oral: {
+    C1: { acts: ['ecrit'], kw: 'consigne question répondre situation communication' },
+    C2: { acts: ['ortho'], kw: 'sons graphies voyelles consonnes' },
+    C3: { acts: ['gram', 'conj'], kw: 'phrase verbe sujet négative types' },
+    C4: { acts: ['ecrit'], kw: 'récit progression chronologique articulateurs marqueurs' },
+    C5: { acts: ['ecrit'], kw: KW_VOC }, C6: { acts: ['ecrit'], kw: KW_VOC } },
+  lect: {
+    C1: { acts: ['ortho'], kw: 'sons graphies voyelles consonnes' },
+    C2: { acts: ['ecrit'], kw: 'question répondre' },
+    C3: { acts: ['ecrit'], kw: 'vocabulaire substituts' }, Voc: { acts: ['ecrit'], kw: 'vocabulaire substituts' },
+    C4: { acts: ['ecrit'], kw: 'question répondre' }, Comp: { acts: ['ecrit'], kw: 'question répondre récit' } },
+  recit: {}
+};
+const ERR_KW = { Orthographique: 'orthographier orthographe homophones graphies', Morphologique: 'accord verbe conjuguer participe pluriel genre',
+  Syntaxique: 'phrase ponctuation sujet verbe négative types', Lexicale: KW_VOC, Phonologique: 'son voyelles consonnes graphies' };
+const findCrit = (g, line) => (GRIDS[g] || { crit: [] }).crit.find(c => critLabel(c) === line || c.name === line || line === c.c || String(line).startsWith(c.c + ' '));
+
+function groupSets(g) {
+  const L = g === 'conj' ? GROUPS_ABCD : GROUPS_4, out = [];
+  const add = (arr, pre) => (arr || []).forEach((gr, i) => out.push({ label: pre + L[i], gr }));
+  if (g === 'lect') { add(S.lect.groups, 'Lecture vocale · '); add(S.lect.groupsComp, 'Compréhension · '); } else add(S[g].groups, '');
+  return out;
+}
+// une requête par critère non maîtrisé (ou par difficulté), enrichie par les erreurs de ce critère
+function remQueries(g, gr, all) {
+  const names = splitList(gr.noms, true).map(n => n.toLowerCase());
+  const errs = (S[g].err || []).filter(e => all || names.includes(String(e.eleve || '').trim().toLowerCase()));
+  const lines = g === 'conj' ? splitList(gr.crit) : [...new Set([...splitList(gr.crit), ...errs.map(e => e.crit).filter(Boolean)])];
+  const out = [];
+  for (const line of lines) {
+    const q = new Map(), acts = new Set();
+    const add = (txt, w) => stems(txt).forEach(k => q.set(k, Math.max(q.get(k) || 0, w)));
+    if (g === 'conj') {
+      const m = /^Difficulté (\d)/.exec(line), full = m ? String((S.conj.diffs || [])[+m[1] - 1] || '') : '';
+      add(full || line, 3); ['conj', 'gram', 'ortho'].forEach(a => acts.add(a));
+    } else {
+      const cr = findCrit(g, line), h = cr && (CRIT_REM[g] || {})[cr.c]; if (!h) continue;
+      add(h.kw, 2); h.acts.forEach(a => acts.add(a));
+      for (const e of errs) if (critCode(g, e.crit) === cr.c) { add(ERR_KW[e.type] || '', 1); add(e.erreur, 1); }
+    }
+    if (q.size) out.push({ q, acts, line });
+  }
+  return out;
+}
+function remScore(g, niv, qy) {
+  const allowed = qy.acts.size ? [...qy.acts] : (REM_ACTS_FOR[g] || []);
+  const res = [];
+  for (const x of remSeries(niv)) {
+    if (!allowed.includes(x.act)) continue;
+    let sc = 0; for (const [k, w] of qy.q) if (x.st.has(k)) sc += w * remIdf(niv, k);
+    if (sc >= 1.5) res.push({ x, sc });
+  }
+  res.sort((a, b) => b.sc - a.sc || a.x.n - b.x.n);
+  return res.filter(r => r.sc >= res[0].sc * 0.6);
+}
+const raMsg = {};
+function raSay(g, m, ok) { raMsg[g] = { m, ok: !!ok }; const el = $('#ra-msg-' + g); if (el) { el.textContent = m; el.className = 'msg ' + (ok ? 'ok' : ''); } }
+const newRa = (o) => ({ id: newId(), grp: [], sel: true, note: '', files: [], ...o });
+function raAuto(g) {
+  const niv = niveau(), list = (S[g].ra ||= []);
+  let sets = groupSets(g).filter(x => splitList(x.gr.noms, true).length || splitList(x.gr.crit).length);
+  if (!sets.length) sets = [{ label: 'Toute la classe', gr: { noms: '', crit: '' }, all: true }];
+  let added = 0, touched = 0;
+  for (const st of sets) {
+    for (const qy of remQueries(g, st.gr, st.all)) {
+      for (const { x } of remScore(g, niv, qy).slice(0, 2)) {
+        let it = list.find(a => a.niv === x.niv && a.act === x.act && a.n === x.n);
+        if (!it) { it = newRa({ niv: x.niv, act: x.act, n: x.n, src: 'ia' }); list.push(it); added++; }
+        if (!it.grp.includes(st.label)) { it.grp.push(st.label); touched++; }
+      }
+    }
+  }
+  if (added || touched) changed();
+  raSay(g, added ? `${added} activité(s) proposée(s) d’après le fichier-classe de ${niv}ème année : vérifiez et retenez celles qui conviennent.`
+    : touched ? 'Les activités correspondantes figurent déjà dans la liste.'
+    : 'Aucune fiche ne correspond : renseignez d’abord les critères non maîtrisés (bilans) ou les erreurs, ou ajoutez une fiche à la main.', !!(added || touched));
+  render(true);
+}
+
+// fichiers insérés : stockés sur l'appareil (IndexedDB) ; seul le nom/taille est dans le dossier
+const RA_MAX = 25 * 1024 * 1024;
+const idb = () => new Promise((ok, ko) => {
+  try { const r = indexedDB.open('dossier5.files', 1); r.onupgradeneeded = () => r.result.createObjectStore('f'); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); } catch (e) { ko(e); }
+});
+const idbDo = (mode, fn) => idb().then(db => new Promise((ok, ko) => { const tx = db.transaction('f', mode); const rq = fn(tx.objectStore('f')); tx.oncomplete = () => ok(rq && rq.result); tx.onerror = () => ko(tx.error); }));
+const fPut = (id, blob) => idbDo('readwrite', st => st.put(blob, id));
+const fGet = id => idbDo('readonly', st => st.get(id));
+const fDel = id => idbDo('readwrite', st => st.delete(id)).catch(() => {});
+const blobB64 = b => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = () => ko(r.error); r.readAsDataURL(b); });
+async function raOpen(meta, say) {
+  let blob; try { blob = await fGet(meta.id); } catch (e) { /* ignore */ }
+  if (!blob) return say('Fichier introuvable sur cet appareil (les fichiers ne sont pas synchronisés dans le cloud).');
+  const C = window.Capacitor, Pl = C && C.Plugins;
+  try {
+    if (C && C.isNativePlatform && C.isNativePlatform() && Pl && Pl.Filesystem && Pl.Share) {
+      const f = await Pl.Filesystem.writeFile({ path: meta.name.replace(/[^\w.\- ]+/g, '_'), data: await blobB64(blob), directory: 'CACHE' });
+      await Pl.Share.share({ title: meta.name, url: f.uri, dialogTitle: 'Ouvrir ou partager le fichier' });
+    } else {
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = meta.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+  } catch (e) { say('Impossible d’ouvrir le fichier : ' + ((e && e.message) || e)); }
+}
+const raSize = n => (n > 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko');
+const raIcon = t => (/^image/.test(t) ? '🖼️' : /pdf/.test(t) ? '📕' : /^audio/.test(t) ? '🎧' : /^video/.test(t) ? '🎬' : '📎');
+
+function raFilesHtml(g, i, it) {
+  return `<div class="rafiles">${(it.files || []).map((f, k) => `<div class="rafile"><span>${raIcon(f.type)} ${esc(f.name)} <small>(${raSize(f.size)})</small></span>
+    <button class="btn sec sm" data-act="rafopen" data-g="${g}" data-i="${i}" data-k="${k}">Ouvrir</button>
+    <button class="btn red sm" data-act="rafdel" data-g="${g}" data-i="${i}" data-k="${k}" aria-label="Retirer le fichier">✕</button></div>`).join('')}
+    <label class="btn sec sm rainsert">📎 Insérer un fichier<input type="file" multiple data-rafile="${g}|${i}"></label>
+    <div class="hint" id="rafmsg-${g}-${i}"></div></div>`;
+}
+function raItemHtml(g, it, i) {
+  const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
+  const grp = (it.grp || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+  const head = it.src === 'libre'
+    ? `<label class="f"><span>Intitulé de l’activité de remédiation</span><input data-b="${g}|ra|${i}|titre" value="${esc(it.titre || '')}"></label>`
+    : x ? `<div class="rahead"><b>${esc(REM_LABEL[x.act])}</b> · ${esc(remRange(x))} · p. ${x.f[0].p} <span class="tag">${x.niv}ème année</span></div>
+      <div class="raos">${esc(x.os)}</div>
+      <details><summary>Voir les ${x.f.length} fiche(s) et leurs exercices</summary>${x.f.map(f => `<div class="rafiche"><b>${esc(f.c)}</b> · p. ${f.p}${f.s ? `<div class="hint">${esc(f.s)}</div>` : ''}${(f.e || []).map(e => `<div>• ${esc(e)}</div>`).join('')}</div>`).join('')}</details>`
+      : '<div class="hint">Fiche introuvable dans le catalogue.</div>';
+  return `<div class="card raitem ${it.sel === false ? 'off' : ''}">
+    <label class="chk"><input type="checkbox" data-rasel="${g}|${i}" ${it.sel === false ? '' : 'checked'}> <b>Activité retenue</b>${it.src === 'ia' ? ' <span class="tag">🤖 proposée</span>' : ''}</label>
+    ${head}${grp ? `<div class="ragrp">${grp}</div>` : ''}
+    <label class="f"><span>Remarques, organisation, date</span><textarea rows="2" data-b="${g}|ra|${i}|note">${esc(it.note || '')}</textarea></label>
+    ${raFilesHtml(g, i, it)}
+    <button class="btn red sm" data-act="radel" data-g="${g}" data-i="${i}">Supprimer l’activité</button></div>`;
+}
+function remedActHtml(g) {
+  const niv = niveau(), list = S[g].ra || [], rm = raMsg[g] || { m: '', ok: false };
+  const info = g === 'recit' ? 'Les fichiers-classe ne contiennent pas de fiches de récitation : ajoutez vos propres activités et insérez vos documents.'
+    : (g === 'ecrit' || g === 'conj') ? `Les fiches proviennent des fiches de remédiation du fichier-classe de ${niv}ème année (grammaire, conjugaison, orthographe, expression écrite), choisies selon les critères non maîtrisés et les erreurs des bilans.`
+    : 'Les fichiers-classe ne contiennent pas de fiches propres à cette activité : l’IA propose des fiches de langue proches des critères non maîtrisés.';
+  const order = [...new Set([...(REM_ACTS_FOR[g] || []), ...Object.keys(REM_LABEL)])];
+  const sel = `<select data-raadd="${g}"><option value="">＋ Ajouter une fiche du fichier-classe…</option>${order.map(a => {
+    const ss = remSeries(niv).filter(x => x.act === a); if (!ss.length) return '';
+    return `<optgroup label="${esc(REM_LABEL[a])}">${ss.map(x => `<option value="${a}|${x.n}">${esc(remRange(x))} — ${esc(x.os.slice(0, 70))}</option>`).join('')}</optgroup>`;
+  }).join('')}</select>`;
+  return `<div class="card aicard"><h3>🧩 Activités de remédiation</h3><p class="hint">${esc(info)}</p>${rnivHtml()}
+    <div class="msg ${rm.ok ? 'ok' : ''}" id="ra-msg-${g}">${esc(rm.m)}</div>
+    <div class="stack"><button class="btn" data-act="raauto" data-g="${g}">🤖 Proposer automatiquement les activités</button>${sel}
+    <button class="btn sec" data-act="rafree" data-g="${g}">+ Activité personnalisée</button></div>
+    <p class="hint">Les fichiers insérés restent sur cet appareil : ils ne sont pas envoyés dans le cloud.</p></div>
+    ${list.map((it, i) => raItemHtml(g, it, i)).join('') || '<p class="hint">Aucune activité pour le moment.</p>'}`;
+}
+
+/* =====================================================================
    6. SECTIONS
    ===================================================================== */
 const SECTIONS = {
@@ -481,7 +730,7 @@ const SECTIONS = {
       <div class="hint">Direction Régionale de l’Enseignement de ${esc(S.meta.dre)} · Circonscription ${esc(S.meta.circ)} pour la langue française</div>
       <div class="big">CAHIER D’ÉVALUATION — ${esc(S.meta.classe)}</div></div>
     <div class="card">${field('Direction régionale', 'meta|dre')}${field('Circonscription', 'meta|circ')}${field('École primaire', 'meta|ecole')}
-      ${field('Classe', 'meta|classe')}${field('Année scolaire', 'meta|annee')}${field('Prénom et nom de l’enseignant(e)', 'meta|enseignant')}
+      ${field('Classe', 'meta|classe')}${rnivHtml()}${field('Année scolaire', 'meta|annee')}${field('Prénom et nom de l’enseignant(e)', 'meta|enseignant')}
       ${field('L’inspecteur', 'meta|inspecteur')}${field('L’assistant pédagogique', 'meta|assistant')}</div>`]] },
 
   eleves: { icon: '👥', title: 'Liste des élèves', sub: 'Nom, naissance, sexe', tabs: [['Liste nominative', () => `<div class="card">
@@ -500,7 +749,8 @@ const SECTIONS = {
   recit: { icon: '🎭', title: 'Récitation', sub: 'Grille · mise en train', tabs: [
     ['Grille', () => `<div class="card"><div class="row2">${field('Module d’évaluation N°', 'recit|module')}<div></div></div>
       ${field('Poème 1', 'recit|poemes|P1')}${field('Poème 2', 'recit|poemes|P2')}</div>${gridHtml('recit')}`],
-    ['Mise en train', () => groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'recit')]] },
+    ['Mise en train', () => groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'recit')],
+    ['Activités de remédiation', () => remedActHtml('recit')]] },
 
   oral: { icon: '🗣️', title: 'Expression orale', sub: 'Fiche · grille', tabs: [
     ['Fiche', () => `<div class="card"><h3>Expression orale — 5ème année</h3>
@@ -511,7 +761,8 @@ const SECTIONS = {
       ${[0, 1, 2].map(i => `<div class="card"><h3>Épreuve d’évaluation n°${i + 1}</h3>${field('Objectifs de communication + lexique et structures à employer par l’élève + questions proposées', `oral|epr|${i}`, { ta: 1, rows: 6 })}</div>`).join('')}`],
     ['Grille', () => gridHtml('oral')],
     ['Erreurs', () => errorsHtml('oral')],
-    ['Bilan', () => groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'oral')]] },
+    ['Bilan', () => groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'oral')],
+    ['Activités de remédiation', () => remedActHtml('oral')]] },
 
   lect: { icon: '📖', title: 'Lecture', sub: 'Grille · vocale & compréhension', tabs: [
     ['Textes', () => S.lect.textes.map((t, i) => `<div class="card"><h3>Texte N°${i + 1} proposé à la lecture vocale</h3>
@@ -520,12 +771,14 @@ const SECTIONS = {
     ['Erreurs', () => errorsHtml('lect')],
     ['Bilans', () => groupsHtml('lect|groups', 'Résultats en lecture vocale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect') +
       groupsHtml('lect|groupsComp', 'Résultats en lecture compréhension', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect')],
+    ['Activités de remédiation', () => remedActHtml('lect')],
     ['Remédiation', () => remedHtml('lect|remed', 'Dispositif de remédiation de la lecture')]] },
 
   ecrit: { icon: '✍️', title: 'Production écrite', sub: 'Grille', tabs: [
     ['Grille', () => gridHtml('ecrit')],
     ['Erreurs', () => errorsHtml('ecrit')],
     ['Bilan', () => groupsHtml('ecrit|groups', 'Résultats à l’écrit', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'ecrit')],
+    ['Activités de remédiation', () => remedActHtml('ecrit')],
     ['Remédiation', () => remedHtml('ecrit|remed', 'Dispositif de remédiation de la production')]] },
 
   conj: { icon: '🔤', title: 'Conjugaison · Grammaire · Orthographe', sub: 'Difficultés & % de réussite', tabs: [
@@ -541,8 +794,12 @@ const SECTIONS = {
       <p class="hint">Touchez une case : ✓ (réussi) → ✗ (non réussi) → vide.</p>`;
     }],
     ['Bilan', () => groupsHtml('conj|groups', 'Résultats des élèves', GROUPS_ABCD, ['noms', 'crit', 'dec'], 'conj') +
-      remedHtml('conj|remed', 'Dispositif de remédiation (conjugaison / grammaire / orthographe)')]] }
+      remedHtml('conj|remed', 'Dispositif de remédiation (conjugaison / grammaire / orthographe)')],
+    ['Activités de remédiation', () => remedActHtml('conj')]] }
 };
+const TILE_COL = { couv: '#2563eb', eleves: '#0d9488', recit: '#db2777', oral: '#ea580c', lect: '#7c3aed', ecrit: '#16a34a', conj: '#ca8a04',
+  classes: '#0891b2', look: '#9333ea', pdf: '#475569' };
+const tileStyle = k => { const c = TILE_COL[k] || '#667085', n = parseInt(c.slice(1), 16); return `--tc:${c};--tb:rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},.10)`; };
 const HOME_ORDER = ['couv', 'eleves', 'recit', 'oral', 'lect', 'ecrit', 'conj'];
 const EXTRA = [['classes', '🏫', 'Mes classes', 'Plusieurs classes'], ['look', '🎨', 'Apparence', 'Police, taille, couleurs'], ['pdf', '🖨️', 'Imprimer / PDF', 'Exporter le dossier']];
 
@@ -562,8 +819,8 @@ function render(keepScroll) {
   const title = view.sec === 'home' ? `Dossier d’évaluation · ${S.meta.classe}` : sec.title;
   let body;
   if (view.sec === 'home') {
-    body = `<div class="home">${HOME_ORDER.map(k => `<button class="tile" data-go="${k}"><span>${SECTIONS[k].icon}</span>${esc(SECTIONS[k].title)}<small>${esc(SECTIONS[k].sub)}</small></button>`).join('')}
-      ${EXTRA.map(([a, i, t, sub]) => `<button class="tile alt" data-act="${a}"><span>${i}</span>${t}<small>${sub}</small></button>`).join('')}</div>
+    body = `<div class="home">${HOME_ORDER.map(k => `<button class="tile" data-go="${k}" style="${tileStyle(k)}"><span>${SECTIONS[k].icon}</span><b class="tt">${esc(SECTIONS[k].title)}</b><small>${esc(SECTIONS[k].sub)}</small></button>`).join('')}
+      ${EXTRA.map(([a, i, t, sub]) => `<button class="tile alt" data-act="${a}" style="${tileStyle(a)}"><span>${i}</span><b class="tt">${t}</b><small>${sub}</small></button>`).join('')}</div>
       <p class="hint" style="text-align:center;margin-top:18px">Circonscription ${esc(S.meta.circ)} pour la langue française</p>`;
   } else {
     if (view.tab >= sec.tabs.length) view.tab = 0;
@@ -699,7 +956,11 @@ const FONTS = {
 };
 const PRESETS = [['Bleu', '#1e3a8a', '#2f5bd8'], ['Vert', '#14532d', '#16a34a'], ['Violet', '#4c1d95', '#7c3aed'],
   ['Rouge', '#7f1d1d', '#dc2626'], ['Orange', '#7c2d12', '#ea580c'], ['Turquoise', '#134e4a', '#0d9488'], ['Gris', '#1f2937', '#4b5563']];
-const DEF_PREFS = { font: 'sys', size: 16, pri: '#1e3a8a', pri2: '#2f5bd8', ink: '#1b2437', bg: '#f4f6fb' };
+const DEF_PREFS = { font: 'sys', size: 16, pri: '#1e3a8a', pri2: '#2f5bd8', ink: '#1b2437', bg: '#f4f6fb',
+  tf: '', tz: 0, tc: '', sf: '', sz: 0, sc: '', bf: '', bz: 0, bc: '' };
+// réglages détaillés : t = titres, s = sous-titres et libellés, b = écriture dans les tableaux (police, taille px, couleur ; vide / 0 = automatique)
+const PG = [['t', 'Titres', 10, 34, 16, '#1e3a8a'], ['s', 'Sous-titres et libellés', 9, 24, 12, '#667085'], ['b', 'Écriture dans les tableaux', 9, 22, 13, '#1b2437']];
+let lookOpen = '';
 const LSP = 'dossier5.prefs';
 const isHex = v => /^#[0-9a-f]{6}$/i.test(v || '');
 function loadPrefs() {
@@ -709,6 +970,11 @@ function loadPrefs() {
     if (FONTS[r.font]) p.font = r.font;
     if (+r.size >= 12 && +r.size <= 24) p.size = Math.round(+r.size);
     for (const k of ['pri', 'pri2', 'ink', 'bg']) if (isHex(r[k])) p[k] = r[k];
+    for (const [g, , lo, hi] of PG) {
+      p[g + 'f'] = FONTS[r[g + 'f']] ? r[g + 'f'] : '';
+      const z = Math.round(+r[g + 'z']); p[g + 'z'] = z >= lo && z <= hi ? z : 0;
+      p[g + 'c'] = isHex(r[g + 'c']) ? r[g + 'c'] : '';
+    }
   } catch (e) { /* ignore */ }
   return p;
 }
@@ -727,6 +993,10 @@ function applyPrefs() {
   st.setProperty('--ink', P.ink); st.setProperty('--bg', P.bg);
   st.setProperty('--onpri', onColor(P.pri)); st.setProperty('--onpri2', onColor(P.pri2));
   st.setProperty('--soft', mix(P.pri2, '#ffffff', .12)); st.setProperty('--soft2', mix(P.pri2, '#ffffff', .22));
+  for (const [g] of PG) {
+    const set = (n, v) => (v ? st.setProperty(n, v) : st.removeProperty(n));
+    set(`--${g}f`, P[g + 'f'] ? FONTS[P[g + 'f']].css : ''); set(`--${g}z`, P[g + 'z'] ? P[g + 'z'] + 'px' : ''); set(`--${g}c`, P[g + 'c']);
+  }
   const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', P.pri);
 }
 function lookModal() {
@@ -742,6 +1012,15 @@ function lookModal() {
       <label class="f"><span>Couleur d’accent (boutons)</span><input type="color" data-pref="pri2" value="${P.pri2}"></label></div>
     <div class="row2"><label class="f"><span>Couleur du texte</span><input type="color" data-pref="ink" value="${P.ink}"></label>
       <label class="f"><span>Couleur du fond</span><input type="color" data-pref="bg" value="${P.bg}"></label></div>
+    <h3 style="margin:14px 0 4px">Titres, sous-titres et tableaux</h3>
+    <p class="hint">Police, taille et couleur de chaque type de texte. « Auto » reprend la police et la taille générales. La couleur des titres ne change pas l’en-tête bleu (pour rester lisible).</p>
+    ${PG.map(([g, lab, lo, hi, d, dc]) => `<details class="card" style="padding:8px 12px" ${lookOpen === g ? 'open' : ''}><summary><b>${lab}</b></summary>
+      <label class="f"><span>Police</span><select data-pref="${g}f"><option value="">Auto (police générale)</option>${Object.entries(FONTS).map(([k, f]) => `<option value="${k}" ${P[g + 'f'] === k ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}</select></label>
+      <label class="f"><span>Taille : <b id="pf-${g}z-v">${P[g + 'z'] ? P[g + 'z'] + ' px' : 'Auto'}</b></span><input type="range" min="${lo}" max="${hi}" step="1" value="${P[g + 'z'] || d}" data-pref="${g}z"></label>
+      <label class="f"><span>Couleur ${P[g + 'c'] ? '' : '(Auto)'}</span><input type="color" data-pref="${g}c" value="${P[g + 'c'] || (g === 't' ? P.pri : g === 'b' ? P.ink : dc)}"></label>
+      <button class="btn sec sm" data-act="lookgrp" data-g="${g}">Remettre en automatique</button></details>`).join('')}
+    <div class="card"><h3>Aperçu</h3><div class="hint">Sous-titre ou libellé d’exemple</div>
+      <table><thead><tr><th>Élève</th><th>Note</th></tr></thead><tbody><tr><td>Exemple</td><td>12,5</td></tr></tbody></table></div>
     <div class="stack"><button class="btn" data-act="closemodal">Terminé</button><button class="btn red sm" data-act="resetlook">Rétablir les réglages par défaut</button></div>`);
 }
 
@@ -898,7 +1177,9 @@ document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.b) return;
   let v = t.value;
   if (t.dataset.max !== undefined) { const n = num(v); v = n == null ? '' : n; }
-  setP(t.dataset.b, v); changed(); refresh();
+  setP(t.dataset.b, v);
+  if (/\|err\|\d+\|hyp$/.test(t.dataset.b)) setP(t.dataset.b.replace(/hyp$/, 'hypAuto'), 0);   // texte modifié à la main
+  changed(); refresh();
 });
 document.addEventListener('change', e => {
   const t = e.target;
@@ -916,6 +1197,11 @@ document.addEventListener('change', e => {
   if (t.dataset.max !== undefined && t.value !== '') {
     const n = Math.min(Math.max(num(t.value) ?? 0, 0), +t.dataset.max);
     t.value = n; setP(t.dataset.b, n); changed(); refresh();
+  }
+  const mm = /^(\w+)\|err\|(\d+)\|(crit|type)$/.exec(t.dataset.b);
+  if (mm) {
+    const er = S[mm[1]].err[+mm[2]], code = er && critCode(mm[1], er.crit);
+    if (er && er.hypAuto && code) { er.hyp = hypFor(mm[1], code, er.type || 'Autre', er.erreur); changed(); render(true); return; }
   }
   if (t.dataset.b.startsWith('students|') || t.dataset.b.startsWith('meta|')) { /* libellés mis à jour au prochain affichage */ }
 });
@@ -935,6 +1221,7 @@ document.addEventListener('click', async e => {
   if (a === 'look') return lookModal();
   if (a === 'font') { PREFS.font = el.dataset.k; applyPrefs(); savePrefs(); return lookModal(); }
   if (a === 'preset') { const pr = PRESETS[+el.dataset.i]; PREFS.pri = pr[1]; PREFS.pri2 = pr[2]; applyPrefs(); savePrefs(); return lookModal(); }
+  if (a === 'lookgrp') { const g = el.dataset.g; PREFS[g + 'f'] = ''; PREFS[g + 'z'] = 0; PREFS[g + 'c'] = ''; applyPrefs(); savePrefs(); lookOpen = g; return lookModal(); }
   if (a === 'resetlook') { PREFS = { ...DEF_PREFS }; applyPrefs(); savePrefs(); return lookModal(); }
   if (a === 'pdf') return pdfModal();
   if (a === 'mkpdf') return makePdf();
@@ -957,9 +1244,25 @@ document.addEventListener('click', async e => {
   }
   if (a === 'aianalyse') return aiAnalyse(el.dataset.g);
   if (a === 'errauto') return errAuto(el.dataset.g, +el.dataset.i);
+  if (a === 'errhyp') {
+    const er = S[el.dataset.g].err[+el.dataset.i], code = er && critCode(el.dataset.g, er.crit); if (!code) return;
+    er.hyp = hypFor(el.dataset.g, code, er.type || 'Autre', er.erreur); er.hypAuto = 1; changed(); return render(true);
+  }
   if (a === 'aisug') return sugApply(el.dataset.g, el.dataset.path, +el.dataset.i, el.dataset.fields.split(','));
   if (a === 'adderr') { S[el.dataset.g].err.push({ eleve: '', erreur: '', crit: '', type: '', hyp: '' }); changed(); return render(true); }
   if (a === 'delerr') { S[el.dataset.g].err.splice(+el.dataset.i, 1); changed(); return render(true); }
+  if (a === 'raauto') return raAuto(el.dataset.g);
+  if (a === 'rafree') { (S[el.dataset.g].ra ||= []).push(newRa({ src: 'libre', titre: '' })); changed(); return render(true); }
+  if (a === 'radel') {
+    const g = el.dataset.g, it = S[g].ra[+el.dataset.i]; if (!it || !confirm('Supprimer cette activité et ses fichiers ?')) return;
+    for (const f of it.files || []) fDel(f.id);
+    S[g].ra.splice(+el.dataset.i, 1); changed(); return render(true);
+  }
+  if (a === 'rafopen') { const { g, i, k } = el.dataset, f = S[g].ra[+i].files[+k]; return raOpen(f, m => { const b = $(`#rafmsg-${g}-${i}`); if (b) b.textContent = m; }); }
+  if (a === 'rafdel') {
+    const { g, i, k } = el.dataset, f = S[g].ra[+i].files[+k]; if (!f || !confirm(`Retirer « ${f.name} » ?`)) return;
+    fDel(f.id); S[g].ra[+i].files.splice(+k, 1); changed(); return render(true);
+  }
   if (a === 'tog') {
     const { sid, d } = el.dataset; const m = (S.conj.marks[sid] ||= {});
     m[d] = m[d] === 'ok' ? 'ko' : m[d] === 'ko' ? '' : 'ok';
@@ -976,6 +1279,8 @@ document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset || !t.dataset.pref) return;
   const k = t.dataset.pref;
   if (k === 'size') { PREFS.size = Math.min(24, Math.max(12, Math.round(+t.value) || 16)); const l = $('#pf-size-v'); if (l) l.textContent = PREFS.size + ' px'; }
+  else if (/^[tsb]f$/.test(k)) PREFS[k] = FONTS[t.value] ? t.value : '';
+  else if (/^[tsb]z$/.test(k)) { PREFS[k] = Math.round(+t.value) || 0; const l = $('#pf-' + k + '-v'); if (l) l.textContent = PREFS[k] + ' px'; }
   else if (isHex(t.value)) PREFS[k] = t.value;
   applyPrefs(); savePrefs();
 });
@@ -984,6 +1289,31 @@ document.addEventListener('change', e => {
   pdfSel[t.dataset.pdfsec] = t.checked;
 });
 
+document.addEventListener('change', async e => {
+  const t = e.target; if (!t || !t.dataset) return;
+  if (t.dataset.rniv) { S.meta.niveau = t.value; changed(); return render(true); }
+  if (t.dataset.rasel) { const [g, i] = t.dataset.rasel.split('|'); S[g].ra[+i].sel = t.checked; changed(); return render(true); }
+  if (t.dataset.raadd) {
+    const g = t.dataset.raadd, [act, n] = String(t.value).split('|'); if (!act) return;
+    const list = (S[g].ra ||= []), niv = niveau();
+    if (list.some(a => a.niv === niv && a.act === act && a.n === +n)) raSay(g, 'Cette fiche figure déjà dans la liste.');
+    else { list.push(newRa({ niv, act, n: +n, src: 'fiche' })); changed(); raSay(g, 'Fiche ajoutée.', true); }
+    return render(true);
+  }
+  if (t.dataset.rafile) {
+    const [g, i] = t.dataset.rafile.split('|'), it = S[g].ra[+i], say = m => { const b = $(`#rafmsg-${g}-${i}`); if (b) b.textContent = m; };
+    const files = [...(t.files || [])]; if (!it || !files.length) return;
+    let ok = 0, bad = '';
+    for (const f of files) {
+      if (f.size > RA_MAX) { bad = `« ${f.name} » dépasse 25 Mo.`; continue; }
+      try { const id = newId(); await fPut(id, f); (it.files ||= []).push({ id, name: f.name, size: f.size, type: f.type || '' }); ok++; }
+      catch (err) { bad = 'Enregistrement impossible sur cet appareil (espace insuffisant ?).'; }
+    }
+    if (ok) changed();
+    render(true);
+    if (bad) { const b = $(`#rafmsg-${g}-${i}`); if (b) b.textContent = bad; }
+  }
+});
 window.addEventListener('online', () => { if (user) pushNow(); });
 // bouton "retour" Android (plugin @capacitor/app)
 try {
