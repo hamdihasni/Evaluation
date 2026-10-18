@@ -1132,11 +1132,17 @@ function applyPrefs() {
   }
   const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', P.pri);
 }
+const IA_PRESETS = {
+  anthropic: { label: 'Claude (Anthropic)', prov: 'anthropic', model: 'claude-sonnet-5-5' },
+  gemini: { label: 'Google Gemini (clé gratuite possible)', prov: 'openai', model: 'gemini-2.5-flash', base: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  groq: { label: 'Groq (clé gratuite possible)', prov: 'openai', model: 'llama-3.3-70b-versatile', base: 'https://api.groq.com/openai/v1' },
+  openai: { label: 'OpenAI ou compatible (Mistral, OpenRouter…)', prov: 'openai', model: 'gpt-4o', base: 'https://api.openai.com/v1' }
+};
 function iaModal(msg = '', ok = false) {
-  const anth = AI.prov === 'anthropic';
+  const anth = AI.prov === 'anthropic', cur = IA_PRESETS[AI.preset] ? AI.preset : (anth ? 'anthropic' : 'openai');
   modal(`<h2>🤖 Intelligence artificielle</h2>
     <p class="hint">Branchez une IA puissante avec votre clé API : détection des erreurs (sens, cohérence, consigne), critère/type/hypothèse, difficultés et décisions de remédiation, activités de remédiation (y compris personnalisées). Sans clé, l’application utilise ses règles internes et LanguageTool.</p>
-    <label class="f"><span>Fournisseur</span><select id="ia-prov"><option value="anthropic" ${anth ? 'selected' : ''}>Claude (Anthropic)</option><option value="openai" ${anth ? '' : 'selected'}>OpenAI ou compatible (Mistral, Groq, OpenRouter…)</option></select></label>
+    <label class="f"><span>Fournisseur</span><select id="ia-prov">${Object.entries(IA_PRESETS).map(([k, p]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label>
     <label class="f"><span>Modèle</span><input id="ia-model" value="${esc(AI.model)}" autocapitalize="off" autocomplete="off"></label>
     ${anth ? '' : `<label class="f"><span>Adresse de l’API</span><input id="ia-base" value="${esc(AI.base)}" autocapitalize="off" autocomplete="off"></label>`}
     <label class="f"><span>Clé API</span><input id="ia-key" type="password" value="${esc(AI.key)}" autocapitalize="off" autocomplete="off"></label>
@@ -1544,7 +1550,8 @@ document.addEventListener('change', e => {
 
 document.addEventListener('change', e => {
   const t = e.target; if (!t || t.id !== 'ia-prov') return;
-  iaRead(); AI.prov = t.value; AI.model = AI.prov === 'anthropic' ? 'claude-sonnet-5-5' : 'gpt-4o'; iaModal();
+  iaRead(); const pr = IA_PRESETS[t.value]; if (!pr) return;
+  AI.preset = t.value; AI.prov = pr.prov; AI.model = pr.model; if (pr.base) AI.base = pr.base; iaModal();
 });
 document.addEventListener('change', async e => {
   const t = e.target; if (!t || !t.dataset) return;
