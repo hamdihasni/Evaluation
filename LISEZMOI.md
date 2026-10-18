@@ -25,6 +25,18 @@ Totaux et moyennes sont calculés automatiquement. Les données sont enregistré
   Dans les bilans, « 🤖 Suggérer difficultés et remédiation » remplit « Difficultés à traiter » et « Décisions de remédiation »
   à partir des critères non maîtrisés du groupe et des erreurs de ses élèves (règles dans `SUG_REM` de `www/app.js`, à adapter).
 
+- **Activités de remédiation** (nouvel onglet après les bilans de chaque activité) : le bouton « 🤖 Proposer automatiquement » choisit,
+  dans les **fiches de remédiation des fichiers-classe de 5ème et de 6ème année** (catalogue `www/remediation-data.js`, extrait des PDF),
+  les fiches correspondant aux critères non maîtrisés et aux erreurs de chaque groupe, selon le type d'activité (expression écrite,
+  grammaire, conjugaison, orthographe). Le niveau se règle dans Couverture → « Niveau du fichier-classe » (automatique d'après le nom de la classe).
+  On peut aussi ajouter une fiche à la main ou une activité personnalisée, et **insérer un fichier** (photo, PDF, document…) dans chaque activité.
+  Les fichiers restent sur l'appareil (non synchronisés dans le cloud). Les PDF n'ont pas de fiches pour la récitation, l'expression orale et la lecture :
+  pour ces activités, l'IA propose des fiches de langue proches des critères.
+- **Hypothèses explicatives** liées au critère : chaque erreur détectée reçoit une hypothèse qui dépend du critère retenu (ex. « Critère C4 - Orthographe : … »).
+  Elle se met à jour si vous changez le critère ou le type, et le bouton « 🤖 Hypothèse selon le critère » la régénère.
+- **Apparence** : police, taille et couleur séparées pour les titres, les sous-titres/libellés et l'écriture dans les tableaux.
+- **Accueil** : chaque activité a son cadre de couleur.
+
 ## Obtenir l'APK (sans installer Android Studio) — environ 20 minutes
 
 ### 1. Créer le projet cloud (Firebase, gratuit)
