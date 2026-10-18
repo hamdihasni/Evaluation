@@ -690,7 +690,8 @@ function raFilesHtml(g, i, it) {
 }
 function raItemHtml(g, it, i) {
   const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
-  const grp = (it.grp || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+  const gl = [...new Set([...groupSets(g).map(x => x.label), 'Toute la classe', ...(it.grp || [])])];
+  const grp = '';
   const head = it.src === 'libre'
     ? `<label class="f"><span>Intitulé de l’activité de remédiation</span><input data-b="${g}|ra|${i}|titre" value="${esc(it.titre || '')}"></label>`
     : x ? `<div class="rahead"><b>${esc(REM_LABEL[x.act])}</b> · ${esc(remRange(x))} · p. ${x.f[0].p} <span class="tag">${x.niv}ème année</span></div>
@@ -699,7 +700,8 @@ function raItemHtml(g, it, i) {
       : '<div class="hint">Fiche introuvable dans le catalogue.</div>';
   return `<div class="card raitem ${it.sel === false ? 'off' : ''}">
     <label class="chk"><input type="checkbox" data-rasel="${g}|${i}" ${it.sel === false ? '' : 'checked'}> <b>Activité retenue</b>${it.src === 'ia' ? ' <span class="tag">🤖 proposée</span>' : ''}</label>
-    ${head}${grp ? `<div class="ragrp">${grp}</div>` : ''}
+    ${head}
+    <div class="f"><span>Groupes concernés (pour le classement à l’impression)</span>${gl.map(l => `<label class="chk"><input type="checkbox" data-ragrp="${g}|${i}" value="${esc(l)}" ${(it.grp || []).includes(l) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
     <label class="f"><span>Remarques, organisation, date</span><textarea rows="2" data-b="${g}|ra|${i}|note">${esc(it.note || '')}</textarea></label>
     ${raFilesHtml(g, i, it)}
     <button class="btn red sm" data-act="radel" data-g="${g}" data-i="${i}">Supprimer l’activité</button></div>`;
@@ -1028,7 +1030,10 @@ function lookModal() {
    9d. EXPORT PDF (le dessin du PDF est fait par www/pdf.js : jsPDF)
    ===================================================================== */
 const PDF_SECS = [['couv', 'Couverture'], ['eleves', 'Liste des élèves'], ['recit', 'Récitation'], ['oral', 'Expression orale'],
-  ['lect', 'Lecture'], ['ecrit', 'Production écrite'], ['conj', 'Conjugaison · Grammaire · Orthographe']];
+  ['lect', 'Lecture'], ['ecrit', 'Production écrite'], ['conj', 'Conjugaison · Grammaire · Orthographe'],
+  ['ra_recit', 'Activités de remédiation — Récitation'], ['ra_oral', 'Activités de remédiation — Expression orale'],
+  ['ra_lect', 'Activités de remédiation — Lecture'], ['ra_ecrit', 'Activités de remédiation — Production écrite'],
+  ['ra_conj', 'Activités de remédiation — Conjugaison · Grammaire · Orthographe']];
 const pdfSel = Object.fromEntries(PDF_SECS.map(([k]) => [k, true]));
 let pdfOrient = 'landscape';
 
@@ -1077,19 +1082,32 @@ function buildModel(sel) {
   const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
   const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
   const G4 = ['noms', 'crit', 'diff', 'dec'];
-  // activités de remédiation retenues (fiches du fichier-classe ou activités personnalisées)
+  // activités de remédiation retenues (IA + saisies par l'enseignant), classées par groupe
+  const RA_TITLE = { recit: 'Récitation', oral: 'Expression orale', lect: 'Lecture', ecrit: 'Production écrite', conj: 'Conjugaison · Grammaire · Orthographe' };
+  const raText = it => {
+    const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
+    const head = it.src === 'libre' ? (it.titre || 'Activité personnalisée')
+      : x ? `${REM_LABEL[x.act]} ${remRange(x)} (p. ${x.f[0].p}, ${x.niv}ème année) : ${x.os}` : 'Fiche introuvable';
+    const files = (it.files || []).map(f => f.name).join(', ');
+    return '- ' + head + (it.note ? '\n   ' + it.note : '') + (files ? '\n   Fichier(s) joint(s) : ' + files : '');
+  };
   const RA = g => {
-    const rows = (S[g].ra || []).filter(it => it.sel !== false).map(it => {
-      const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
-      const fiche = it.src === 'libre' ? (it.titre || 'Activité personnalisée')
-        : x ? `${REM_LABEL[x.act]}\n${remRange(x)} · p. ${x.f[0].p} · ${x.niv}ème année` : 'Fiche introuvable';
-      const files = (it.files || []).map(f => f.name).join(', ');
-      return [fiche, x ? x.os : '', (it.grp || []).join(', '), [it.note, files ? 'Fichier(s) joint(s) : ' + files : ''].filter(Boolean).join('\n')];
-    });
-    if (!rows.length) return;
-    H2('Activités de remédiation');
-    B.push({ t: 'table', align: 'left', minH: 14, firstW: 34,
-      head: [['Activité', 'Objectif spécifique', 'Groupes concernés', 'Remarques, organisation, fichiers']], body: rows });
+    H1('Activités de remédiation — ' + RA_TITLE[g]);
+    const items = (S[g].ra || []).filter(it => it.sel !== false);
+    if (!items.length) return B.push({ t: 'p', text: 'Aucune activité de remédiation retenue.' });
+    const sets = groupSets(g), rows = [], used = new Set();
+    const crits = gr => splitList(gr.crit).join('\n');
+    for (const st of sets) {
+      const mine = items.filter(it => (it.grp || []).includes(st.label)); if (!mine.length) continue;
+      mine.forEach(it => used.add(it.id));
+      rows.push([st.label, crits(st.gr), mine.map(raText).join('\n')]);
+    }
+    // activités liées à « Toute la classe » ou à aucun groupe
+    const known = new Set(sets.map(x => x.label));
+    const rest = items.filter(it => !(it.grp || []).some(l => known.has(l)));
+    if (rest.length) rows.push(['Toute la classe', '', rest.map(raText).join('\n')]);
+    B.push({ t: 'table', align: 'left', minH: 16, firstW: 26,
+      head: [['Groupe', 'Critères concernés', 'Activités proposées']], body: rows });
   };
   const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
     H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
@@ -1113,7 +1131,6 @@ function buildModel(sel) {
     KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
     B.push(gridModel('recit'));
     H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
-    RA('recit');
   }
   if (sel.includes('oral')) {
     const o = S.oral;
@@ -1127,7 +1144,6 @@ function buildModel(sel) {
     CRIT('oral'); H2('Grille d’évaluation'); B.push(gridModel('oral'));
     ERR('oral');
     H2('Résultats en expression orale'); B.push(grpModel(o.groups, GROUPS_4, G4));
-    RA('oral');
   }
   if (sel.includes('lect')) {
     const l = S.lect;
@@ -1139,7 +1155,6 @@ function buildModel(sel) {
     H2('Résultats en lecture vocale'); B.push(grpModel(l.groups, GROUPS_4, G4));
     H2('Résultats en lecture compréhension'); B.push(grpModel(l.groupsComp, GROUPS_4, G4));
     KV('Dispositif de remédiation de la lecture', l.remed);
-    RA('lect');
   }
   if (sel.includes('ecrit')) {
     const e = S.ecrit;
@@ -1149,7 +1164,6 @@ function buildModel(sel) {
     ERR('ecrit');
     H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
     KV('Dispositif de remédiation de la production', e.remed);
-    RA('ecrit');
   }
   if (sel.includes('conj')) {
     const c = S.conj, d = [0, 1, 2];
@@ -1163,8 +1177,8 @@ function buildModel(sel) {
       foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
     H2('Résultats des élèves'); B.push(grpModel(c.groups, GROUPS_ABCD, ['noms', 'crit', 'dec']));
     KV('Dispositif de remédiation', c.remed);
-    RA('conj');
   }
+  for (const g of ['recit', 'oral', 'lect', 'ecrit', 'conj']) if (sel.includes('ra_' + g)) RA(g);
   return { title: 'Dossier d’évaluation — ' + m.classe, footer: [m.ecole, m.classe, m.annee].filter(Boolean).join(' · '), blocks: B };
 }
 
@@ -1311,6 +1325,10 @@ document.addEventListener('change', e => {
 document.addEventListener('change', async e => {
   const t = e.target; if (!t || !t.dataset) return;
   if (t.dataset.rniv) { S.meta.niveau = t.value; changed(); return render(true); }
+  if (t.dataset.ragrp) {
+    const [g, i] = t.dataset.ragrp.split('|'), it = S[g].ra[+i], l = t.value; if (!it) return;
+    it.grp = t.checked ? [...new Set([...(it.grp || []), l])] : (it.grp || []).filter(x => x !== l); return changed();
+  }
   if (t.dataset.rasel) { const [g, i] = t.dataset.rasel.split('|'); S[g].ra[+i].sel = t.checked; changed(); return render(true); }
   if (t.dataset.raadd) {
     const g = t.dataset.raadd, [act, n] = String(t.value).split('|'); if (!act) return;
