@@ -139,7 +139,6 @@ export async function exportPdf(model, o) {
       out.styles = { textColor: bad ? [200, 0, 0] : [0, 140, 40], fontStyle: 'bold' };
     }
     if (c._lay) out.styles = { valign: 'top', minCellHeight: c._minH };
-    if (c._lay) out._lay = c._lay, out._txtH = c._txtH;
     if (c.kind === 'perf') out.styles = { fillColor: [180, 83, 9], textColor: [255, 255, 255] };
     return out;
   }
@@ -148,8 +147,9 @@ export async function exportPdf(model, o) {
     const pad = 1.3, fs = base * .85, lh = fs * PT * doc.getLineHeightFactor();
     const iw = W - 2 * M - (b.firstW || 26) - (b.midW || 50), avail = iw - 2 * pad, gap = 2, slotW = (avail - gap) / 2, maxH = 42;
     doc.setFont(font, 'normal'); doc.setFontSize(fs);
-    for (const row of b.body) for (const c of row) {
-      if (!c || typeof c !== 'object' || !c.imgs || !c.imgs.length) continue;
+    const look = new Map();   // « ligne|colonne » -> images à dessiner dans cette cellule
+    b.body.forEach((row, ri) => row.forEach(c => {
+      if (!c || typeof c !== 'object' || !c.imgs || !c.imgs.length) return;
       const lines = doc.splitTextToSize(clean(c.c), avail).length, txtH = pad + lines * lh + 1.5, lay = [];
       let ry = 0, rowH = 0, col = 0;
       for (const im of c.imgs) {
@@ -158,13 +158,15 @@ export async function exportPdf(model, o) {
         lay.push({ data: im.data, x: pad + col * (slotW + gap), y: ry, w, h });
         rowH = Math.max(rowH, h); col++;
       }
-      c._lay = lay; c._txtH = txtH; c._minH = txtH + ry + rowH + pad + 1;
-    }
+      c._lay = lay; c._minH = txtH + ry + rowH + pad + 1;
+      look.set(ri + '|' + c.col, { lay, txtH, list: c.imgs });
+    }));
+    return look;
   }
   function table(b) {
     ensure(28);
     const left = b.align === 'left';
-    if (b.imgCol != null) prepImgs(b);
+    const look = b.imgCol != null ? prepImgs(b) : null, drawn = new Set();
     autoTable(doc, {
       startY: y,
       head: b.head.map(r => r.map(cell)),
@@ -178,13 +180,18 @@ export async function exportPdf(model, o) {
       footStyles: { fillColor: soft, textColor: ink, fontStyle: 'bold' },
       columnStyles: left ? { 0: { cellWidth: b.firstW || 26, fontStyle: 'bold' }, ...(b.imgCol != null ? { 1: { cellWidth: b.midW || 50 } } : {}) } : { 0: { halign: 'left', cellWidth: b.firstW || 'auto' } },
       didDrawCell: d => {
-        const o = d.cell.raw;
-        if (d.section === 'body' && o && o._lay) for (const p of o._lay) {
-          try { doc.addImage(p.data, 'JPEG', d.cell.x + p.x, d.cell.y + o._txtH + p.y, p.w, p.h); } catch (e) { /* image ignorée */ }
+        if (!look || d.section !== 'body') return;
+        const key = d.row.index + '|' + d.column.index, o = look.get(key);
+        if (!o || drawn.has(key)) return;
+        drawn.add(key);
+        for (const p of o.lay) {
+          try { doc.addImage(p.data, 'JPEG', d.cell.x + p.x, d.cell.y + o.txtH + p.y, p.w, p.h); } catch (e) { /* image ignorée */ }
         }
       }
     });
     y = doc.lastAutoTable.finalY + 6;
+    // filet de sécurité : images qui n'ont pas pu être dessinées dans leur cellule
+    if (look) for (const [k, o] of look) if (!drawn.has(k)) images({ label: 'Images jointes (suite)', list: o.list });
   }
 
   // images jointes : 3 par ligne, légende = nom du fichier

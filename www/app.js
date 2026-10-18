@@ -1103,7 +1103,7 @@ function buildModel(sel) {
     const addGroup = (label, crit, mine) => {
       mine.forEach((it, j) => {
         const im = raImgs(it);
-        const act = { c: raText(it), imgs: im.slice(0, MAXC) };
+        const act = { c: raText(it), imgs: im.slice(0, MAXC), col: 2 };
         if (im.length > MAXC) over.push([label, im.slice(MAXC)]);
         rows.push(j ? [act] : [{ c: label, rowSpan: mine.length }, { c: crit, rowSpan: mine.length }, act]);
       });
@@ -1224,6 +1224,7 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((_, ko) => setTimeou
 const isPdfFile = f => /pdf/.test(f.type || '') || /\.pdf$/i.test(f.name || '');
 const isImgFile = f => /^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || '');
 async function loadRaImages(sel) {
+  const fails = [];
   for (const g of ['recit', 'oral', 'lect', 'ecrit', 'conj']) {
     if (!sel.includes('ra_' + g)) continue;
     for (const it of (S[g].ra || [])) {
@@ -1234,10 +1235,11 @@ async function loadRaImages(sel) {
           const b = await fGet(f.id); if (!b) continue;
           if (isImgFile(f)) RA_IMG[f.id] = [await blobJpeg(b)];
           else if (isPdfFile(f)) { const pgs = await withTimeout(blobPdfPages(b), 30000); if (pgs.length) RA_IMG[f.id] = pgs; }
-        } catch (e) { /* fichier cité par son nom */ }
+        } catch (e) { fails.push(f.name); }   // fichier cité par son nom
       }
     }
   }
+  return fails;
 }
 async function makePdf() {
   const msg = (t, ok) => { const el = $('#pdf-msg'); if (el) { el.className = 'msg' + (ok ? ' ok' : ''); el.textContent = t; } };
@@ -1246,7 +1248,7 @@ async function makePdf() {
   const orSel = $('#pdf-or'); if (orSel) pdfOrient = orSel.value;
   msg('Génération du PDF…', true);
   try {
-    await loadRaImages(sel);
+    const fails = await loadRaImages(sel);
     const mod = await import('./pdf.js');
     const slug = String(S.meta.classe || 'classe').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
     await mod.exportPdf(buildModel(sel), {
@@ -1254,7 +1256,7 @@ async function makePdf() {
       colors: { pri: PREFS.pri, pri2: PREFS.pri2, ink: PREFS.ink },
       fileName: `Dossier_${slug}_${new Date().toISOString().slice(0, 10)}.pdf`
     });
-    msg('PDF prêt.', true);
+    msg(fails.length ? `PDF prêt. Aperçu impossible pour : ${fails.join(', ')} (pour un PDF joint, une connexion Internet est nécessaire ; le fichier est cité par son nom).` : 'PDF prêt.', true);
   } catch (e) {
     if (e && /cancel/i.test(String(e.message || e))) return msg('');
     msg('Erreur PDF : ' + ((e && e.message) || e));
