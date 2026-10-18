@@ -138,12 +138,33 @@ export async function exportPdf(model, o) {
       const bad = /^-{2}/.test(String(c.c));
       out.styles = { textColor: bad ? [200, 0, 0] : [0, 140, 40], fontStyle: 'bold' };
     }
+    if (c._lay) out.styles = { valign: 'top', minCellHeight: c._minH };
+    if (c._lay) out._lay = c._lay, out._txtH = c._txtH;
     if (c.kind === 'perf') out.styles = { fillColor: [180, 83, 9], textColor: [255, 255, 255] };
     return out;
+  }
+  // images dans les cellules : on réserve la hauteur sous le texte, puis on les dessine après la cellule
+  function prepImgs(b) {
+    const pad = 1.3, fs = base * .85, lh = fs * PT * doc.getLineHeightFactor();
+    const iw = W - 2 * M - (b.firstW || 26) - (b.midW || 50), avail = iw - 2 * pad, gap = 2, slotW = (avail - gap) / 2, maxH = 42;
+    doc.setFont(font, 'normal'); doc.setFontSize(fs);
+    for (const row of b.body) for (const c of row) {
+      if (!c || typeof c !== 'object' || !c.imgs || !c.imgs.length) continue;
+      const lines = doc.splitTextToSize(clean(c.c), avail).length, txtH = pad + lines * lh + 1.5, lay = [];
+      let ry = 0, rowH = 0, col = 0;
+      for (const im of c.imgs) {
+        const k = Math.min(slotW / im.w, maxH / im.h), w = im.w * k, h = im.h * k;
+        if (col === 2) { ry += rowH + gap; rowH = 0; col = 0; }
+        lay.push({ data: im.data, x: pad + col * (slotW + gap), y: ry, w, h });
+        rowH = Math.max(rowH, h); col++;
+      }
+      c._lay = lay; c._txtH = txtH; c._minH = txtH + ry + rowH + pad + 1;
+    }
   }
   function table(b) {
     ensure(28);
     const left = b.align === 'left';
+    if (b.imgCol != null) prepImgs(b);
     autoTable(doc, {
       startY: y,
       head: b.head.map(r => r.map(cell)),
@@ -155,7 +176,13 @@ export async function exportPdf(model, o) {
         lineColor: [190, 198, 215], lineWidth: .2, textColor: ink, overflow: 'linebreak', minCellHeight: b.minH || 0 },
       headStyles: { fillColor: pri, textColor: onPri, fontStyle: 'bold', halign: 'center' },
       footStyles: { fillColor: soft, textColor: ink, fontStyle: 'bold' },
-      columnStyles: left ? { 0: { cellWidth: b.firstW || 26, fontStyle: 'bold' } } : { 0: { halign: 'left', cellWidth: b.firstW || 'auto' } }
+      columnStyles: left ? { 0: { cellWidth: b.firstW || 26, fontStyle: 'bold' }, ...(b.imgCol != null ? { 1: { cellWidth: b.midW || 50 } } : {}) } : { 0: { halign: 'left', cellWidth: b.firstW || 'auto' } },
+      didDrawCell: d => {
+        const o = d.cell.raw;
+        if (d.section === 'body' && o && o._lay) for (const p of o._lay) {
+          try { doc.addImage(p.data, 'JPEG', d.cell.x + p.x, d.cell.y + o._txtH + p.y, p.w, p.h); } catch (e) { /* image ignorée */ }
+        }
+      }
     });
     y = doc.lastAutoTable.finalY + 6;
   }

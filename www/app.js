@@ -1089,28 +1089,36 @@ function buildModel(sel) {
     const x = it.src === 'libre' ? null : remGet(it.niv, it.act, it.n);
     const head = it.src === 'libre' ? (it.titre || 'Activité personnalisée')
       : x ? `${REM_LABEL[x.act]} : ${x.os}` : 'Activité';
-    const others = (it.files || []).filter(f => !isImg(f)).map(f => f.name).join(', ');
+    const others = (it.files || []).filter(f => !RA_IMG[f.id]).map(f => f.name).join(', ');
     return '- ' + head + (it.note ? '\n   ' + it.note : '') + (others ? '\n   Fichier(s) joint(s) : ' + others : '');
   };
-  const raImgs = its => its.flatMap(it => (it.files || []).filter(isImg).map(f => RA_IMG[f.id] && { name: f.name, ...RA_IMG[f.id] }).filter(Boolean));
+  const raImgs = it => (it.files || []).flatMap(f => (RA_IMG[f.id] || []).map((im, k, a) => ({ name: a.length > 1 ? `${f.name} (p. ${k + 1})` : f.name, ...im })));
   const RA = g => {
     H1('Activités de remédiation — ' + RA_TITLE[g]);
     const items = (S[g].ra || []).filter(it => it.sel !== false);
     if (!items.length) return B.push({ t: 'p', text: 'Aucune activité de remédiation retenue.' });
-    const sets = groupSets(g), rows = [], used = new Set(), imgs = [];
+    const sets = groupSets(g), rows = [], over = [];
     const crits = gr => splitList(gr.crit).join('\n');
+    const MAXC = 6;   // images par activité dans la cellule ; le reste suit sous le tableau
+    const addGroup = (label, crit, mine) => {
+      mine.forEach((it, j) => {
+        const im = raImgs(it);
+        const act = { c: raText(it), imgs: im.slice(0, MAXC) };
+        if (im.length > MAXC) over.push([label, im.slice(MAXC)]);
+        rows.push(j ? [act] : [{ c: label, rowSpan: mine.length }, { c: crit, rowSpan: mine.length }, act]);
+      });
+    };
     for (const st of sets) {
-      const mine = items.filter(it => (it.grp || []).includes(st.label)); if (!mine.length) continue;
-      mine.forEach(it => used.add(it.id));
-      rows.push([st.label, crits(st.gr), mine.map(raText).join('\n')]); imgs.push([st.label, raImgs(mine)]);
+      const mine = items.filter(it => (it.grp || []).includes(st.label));
+      if (mine.length) addGroup(st.label, crits(st.gr), mine);
     }
     // activités liées à « Toute la classe » ou à aucun groupe
     const known = new Set(sets.map(x => x.label));
     const rest = items.filter(it => !(it.grp || []).some(l => known.has(l)));
-    if (rest.length) { rows.push(['Toute la classe', '', rest.map(raText).join('\n')]); imgs.push(['Toute la classe', raImgs(rest)]); }
-    B.push({ t: 'table', align: 'left', minH: 16, firstW: 26,
+    if (rest.length) addGroup('Toute la classe', '', rest);
+    B.push({ t: 'table', align: 'left', minH: 16, firstW: 26, midW: 50, imgCol: 2,
       head: [['Groupe', 'Critères concernés', 'Activités proposées']], body: rows });
-    for (const [lab, list] of imgs) if (list.length) B.push({ t: 'imgs', label: 'Images jointes — ' + lab, list });
+    for (const [lab, list] of over) B.push({ t: 'imgs', label: 'Images jointes (suite) — ' + lab, list });
   };
   const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
     H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
@@ -1197,14 +1205,36 @@ async function blobJpeg(blob) {
     return { data: c.toDataURL('image/jpeg', 0.82), w, h };
   } finally { URL.revokeObjectURL(url); }
 }
+// pages d'un PDF joint (3 premières pages) : bibliothèque pdf.js chargée à la demande (Internet requis)
+const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/';
+async function blobPdfPages(blob, max = 3) {
+  const lib = await import(PDFJS + 'pdf.min.mjs');
+  lib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.mjs';
+  const doc = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise, out = [];
+  for (let n = 1; n <= Math.min(max, doc.numPages); n++) {
+    const pg = await doc.getPage(n), v0 = pg.getViewport({ scale: 1 }), k = 1100 / Math.max(v0.width, v0.height), vp = pg.getViewport({ scale: k });
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    await pg.render({ canvasContext: x, viewport: vp }).promise;
+    out.push({ data: c.toDataURL('image/jpeg', 0.8), w: c.width, h: c.height });
+  }
+  return out;
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, ko) => setTimeout(() => ko(new Error('délai dépassé')), ms))]);
+const isPdfFile = f => /pdf/.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+const isImgFile = f => /^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || '');
 async function loadRaImages(sel) {
   for (const g of ['recit', 'oral', 'lect', 'ecrit', 'conj']) {
     if (!sel.includes('ra_' + g)) continue;
     for (const it of (S[g].ra || [])) {
       if (it.sel === false) continue;
       for (const f of (it.files || [])) {
-        if (RA_IMG[f.id] || !(/^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || ''))) continue;
-        try { const b = await fGet(f.id); if (b) RA_IMG[f.id] = await blobJpeg(b); } catch (e) { /* image ignorée */ }
+        if (RA_IMG[f.id]) continue;
+        try {
+          const b = await fGet(f.id); if (!b) continue;
+          if (isImgFile(f)) RA_IMG[f.id] = [await blobJpeg(b)];
+          else if (isPdfFile(f)) { const pgs = await withTimeout(blobPdfPages(b), 30000); if (pgs.length) RA_IMG[f.id] = pgs; }
+        } catch (e) { /* fichier cité par son nom */ }
       }
     }
   }
