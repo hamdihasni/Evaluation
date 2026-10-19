@@ -37,6 +37,14 @@ Totaux et moyennes sont calculés automatiquement. Les données sont enregistré
 - **Apparence** : police, taille et couleur séparées pour les titres, les sous-titres/libellés et l'écriture dans les tableaux.
 - **Accueil** : chaque activité a son cadre de couleur.
 
+## ChatGPT intégré (OpenAI)
+L'application utilise ChatGPT directement, sans écran de réglage : détection des erreurs, hypothèses, pistes de remédiation et activités de remédiation sont générées automatiquement et restent modifiables.
+Un abonnement ChatGPT Plus ne suffit pas : il faut un crédit sur **platform.openai.com** (Billing), puis :
+1. platform.openai.com → **API keys** → créer une clé, et fixer une **limite de dépense mensuelle** (Billing → Limits).
+2. GitHub → dépôt → **Settings → Secrets and variables → Actions → New repository secret** : nom `OPENAI_API_KEY`, valeur = la clé.
+3. Relancer **Actions → Construire l'APK Android**. La clé est ajoutée à l'APK à la compilation (jamais dans le dépôt ni sur le site web public).
+Le modèle se change dans `www/ai-config.js` et dans `build-apk.yml` (`gpt-5-mini` par défaut). L'APK contient la clé : ne le partagez qu'avec des personnes de confiance. Sans clé, l'appli garde ses règles internes et LanguageTool.
+
 ## Obtenir l'APK (sans installer Android Studio) — environ 20 minutes
 
 ### 1. Créer le projet cloud (Firebase, gratuit)
