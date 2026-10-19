@@ -1,0 +1,47 @@
+name: Construire l'APK Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Empaqueter Firebase (cloud)
+        run: npm run build:cloud
+
+      - name: Brancher ChatGPT (clé secrète, jamais publiée)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          node -e "require('fs').writeFileSync('www/ai-config.js','window.AI_CONFIG='+JSON.stringify({key:process.env.OPENAI_API_KEY||'',model:'gpt-5-mini'})+';')"
+
+      - name: Créer le projet Android
+        run: npx cap add android
+
+      - name: Synchroniser
+        run: npx cap sync android
+
+      - name: Compiler l'APK
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dossier-evaluation-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
