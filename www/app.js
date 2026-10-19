@@ -233,7 +233,7 @@ function gridHtml(g) {
    Sans clé, l'application garde ses règles internes et le service gratuit LanguageTool.
    ===================================================================== */
 const LSAI = 'dossier5.ia';
-const AI_DEF = { prov: 'anthropic', model: 'claude-sonnet-5-5', key: '', base: 'https://api.openai.com/v1' };
+const AI_DEF = { prov: 'openai', model: 'gemini-flash-latest', key: '', base: 'https://generativelanguage.googleapis.com/v1beta/openai', preset: 'gemini', chain: true };
 let AI = { ...AI_DEF };
 try { AI = { ...AI_DEF, ...(JSON.parse(localStorage.getItem(LSAI) || 'null') || {}) }; } catch (e) { /* ignore */ }
 const saveAI = () => { try { localStorage.setItem(LSAI, JSON.stringify(AI)); } catch (e) { /* quota */ } };
@@ -244,7 +244,7 @@ async function llm(user, max = 3000) {
   const anth = AI.prov === 'anthropic', key = String(AI.key).replace(/\s+/g, '');
   if (/[^\x21-\x7E]/.test(key)) throw new Error('La clé contient un caractère invalide (espace, retour à la ligne ou symbole copié par erreur) : effacez-la et recopiez-la.');
   if (/^sk-ant-/.test(key) && !anth) throw new Error('Cette clé ressemble à une clé Claude (Anthropic) : choisissez « Claude (Anthropic) » comme fournisseur.');
-  if (/^AIza/.test(key) && !/googleapis/.test(String(AI.base))) throw new Error('Cette clé ressemble à une clé Google Gemini : choisissez OpenAI ou compatible, adresse https://generativelanguage.googleapis.com/v1beta/openai et un modèle Gemini (ex. gemini-2.5-flash).');
+  if (/^AIza/.test(key) && !/googleapis/.test(String(AI.base))) throw new Error('Cette clé ressemble à une clé Google Gemini : choisissez OpenAI ou compatible, adresse https://generativelanguage.googleapis.com/v1beta/openai et le modèle gemini-flash-latest.');
   const url = anth ? 'https://api.anthropic.com/v1/messages' : String(AI.base || AI_DEF.base).replace(/\/+$/, '') + '/chat/completions';
   const headers = anth
     ? { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
@@ -449,6 +449,13 @@ async function aiAnalyse(g) {
       + (d.text.length > LT_MAX ? ' (texte tronqué à 20 000 caractères)' : '');
     d.ok = true;
     render(true);
+    if (list.length && aiOn() && AI.chain !== false) {
+      const base = d.msg;
+      setMsg(base + ' Génération des pistes et des activités de remédiation…', true);
+      await aiAll(g);
+      const r = raMsg[g];
+      setMsg(base + (r && r.ok ? ' Pistes (bilans) et activités (onglet Remédiation) générées : à relire et modifier.' : ' ' + ((r && r.m) || '')), !!(r && r.ok));
+    }
   } catch (e) { d.busy = false; setMsg(String((e && e.message) || e)); }
 }
 
@@ -764,6 +771,32 @@ async function raAuto(g) {
   } catch (e) { raSay(g, String((e && e.message) || e)); }
   render(true);
 }
+// Génération complète : pistes de remédiation (difficultés + décisions) de chaque groupe, puis activités de remédiation.
+// Tout est ajouté dans les champs habituels : l'utilisateur peut tout modifier ou supprimer.
+let allBusy = false;
+async function aiAll(g) {
+  if (allBusy) return; allBusy = true;
+  try {
+    let n = 0;
+    const sets = groupSets(g).filter(x => splitList(x.gr.noms, true).length || splitList(x.gr.crit).length);
+    for (let k = 0; k < sets.length; k++) {
+      const gr = sets[k].gr; let sug = sugBuild(g, gr); if (!sug) continue;
+      raSay(g, `Pistes de remédiation : groupe ${k + 1}/${sets.length}…`, true);
+      if (aiOn()) {
+        try { sug = await sugLLM(g, gr); }
+        catch (e) { raSay(g, String((e && e.message) || e)); render(true); return; }
+      }
+      for (const f of ['diff', 'dec']) {
+        const cur = splitList(gr[f]);
+        for (const l of sug[f]) if (!cur.includes(l)) { cur.push(l); n++; }
+        gr[f] = cur.join('\n');
+      }
+    }
+    if (n) changed();
+    await raAuto(g);
+    if (n && raMsg[g]) raMsg[g].m = `Pistes de remédiation ajoutées dans les bilans. ` + raMsg[g].m;
+  } finally { allBusy = false; }
+}
 function raAutoRules(g) {
   const niv = niveau(), list = (S[g].ra ||= []);
   let sets = groupSets(g).filter(x => splitList(x.gr.noms, true).length || splitList(x.gr.crit).length);
@@ -849,7 +882,7 @@ function remedActHtml(g) {
   }).join('')}</select>`;
   return `<div class="card aicard"><h3>🧩 Activités de remédiation</h3><p class="hint">${esc(info)}</p>${rnivHtml()}
     <div class="msg ${rm.ok ? 'ok' : ''}" id="ra-msg-${g}">${esc(rm.m)}</div>
-    <div class="stack"><button class="btn" data-act="raauto" data-g="${g}">🤖 Proposer automatiquement les activités</button>${sel}
+    <div class="stack"><button class="btn" data-act="aiall" data-g="${g}">🤖 Tout générer : pistes et activités</button><button class="btn sec" data-act="raauto" data-g="${g}">Activités seulement</button>${sel}
     <button class="btn sec" data-act="rafree" data-g="${g}">+ Activité personnalisée</button></div>
     <p class="hint">Les fichiers insérés restent sur cet appareil : ils ne sont pas envoyés dans le cloud.</p></div>
     ${list.map((it, i) => raItemHtml(g, it, i)).join('') || '<p class="hint">Aucune activité pour le moment.</p>'}`;
@@ -1134,7 +1167,7 @@ function applyPrefs() {
 }
 const IA_PRESETS = {
   anthropic: { label: 'Claude (Anthropic)', prov: 'anthropic', model: 'claude-sonnet-5-5' },
-  gemini: { label: 'Google Gemini (clé gratuite possible)', prov: 'openai', model: 'gemini-2.5-flash', base: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  gemini: { label: 'Google Gemini (gratuit, recommandé)', prov: 'openai', model: 'gemini-flash-latest', base: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   groq: { label: 'Groq (clé gratuite possible)', prov: 'openai', model: 'llama-3.3-70b-versatile', base: 'https://api.groq.com/openai/v1' },
   openai: { label: 'OpenAI ou compatible (Mistral, OpenRouter…)', prov: 'openai', model: 'gpt-4o', base: 'https://api.openai.com/v1' }
 };
@@ -1146,7 +1179,9 @@ function iaModal(msg = '', ok = false) {
     <label class="f"><span>Modèle</span><input id="ia-model" value="${esc(AI.model)}" autocapitalize="off" autocomplete="off"></label>
     ${anth ? '' : `<label class="f"><span>Adresse de l’API</span><input id="ia-base" value="${esc(AI.base)}" autocapitalize="off" autocomplete="off"></label>`}
     <label class="f"><span>Clé API</span><input id="ia-key" type="password" value="${esc(AI.key)}" autocapitalize="off" autocomplete="off"></label>
+    ${cur === 'gemini' ? '<p class="hint"><b>IA gratuite :</b> ouvrez aistudio.google.com/apikey, connectez-vous avec un compte Google, touchez « Create API key », puis collez la clé ci-dessous. Aucune carte bancaire. Le quota gratuit est limité (quelques dizaines de demandes par jour) et Google peut utiliser les textes envoyés pour améliorer ses modèles : ne saisissez jamais de nom d’élève.</p>' : ''}
     <p class="hint">La clé est enregistrée sur cet appareil uniquement (jamais dans le cloud du dossier) et envoyée seulement au fournisseur choisi. Conseil : créez une clé dédiée avec une limite de dépense. Seuls les textes, critères et erreurs sont envoyés, jamais les noms des élèves.</p>
+    <label class="chk"><input type="checkbox" id="ia-chain" ${AI.chain !== false ? 'checked' : ''}> Après la détection des erreurs, générer automatiquement les pistes et les activités de remédiation (utilise plus de demandes du quota gratuit)</label>
     <div class="msg ${ok ? 'ok' : ''}" id="ia-msg">${esc(msg)}</div>
     <div class="stack"><button class="btn" data-act="iasave">Enregistrer</button><button class="btn sec" data-act="iatest">Tester la connexion</button>
     <button class="btn red" data-act="iaclear">Effacer la clé</button><button class="btn sec" data-act="closemodal">Fermer</button></div>`);
@@ -1157,6 +1192,7 @@ function iaRead() {
   if (m !== null) AI.model = m || (AI.prov === 'anthropic' ? 'claude-sonnet-5-5' : 'gpt-4o');
   if (k !== null) AI.key = k.replace(/\s+/g, '');
   if (b !== null) AI.base = b || AI_DEF.base;
+  const ch = $('#ia-chain'); if (ch) AI.chain = ch.checked;
 }
 function lookModal() {
   const P = PREFS;
@@ -1511,6 +1547,7 @@ document.addEventListener('click', async e => {
   if (a === 'adderr') { S[el.dataset.g].err.push({ eleve: '', erreur: '', crit: '', type: '', hyp: '' }); changed(); return render(true); }
   if (a === 'delerr') { S[el.dataset.g].err.splice(+el.dataset.i, 1); changed(); return render(true); }
   if (a === 'raauto') return raAuto(el.dataset.g);
+  if (a === 'aiall') return aiAll(el.dataset.g);
   if (a === 'rafree') { (S[el.dataset.g].ra ||= []).push(newRa({ src: 'libre', titre: '' })); changed(); return render(true); }
   if (a === 'radel') {
     const g = el.dataset.g, it = S[g].ra[+el.dataset.i]; if (!it || !confirm('Supprimer cette activité et ses fichiers ?')) return;
