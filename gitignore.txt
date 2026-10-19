@@ -1,0 +1,5 @@
+node_modules/
+android/
+www/cloud.js.map
+www/pdf.js.map
+www/pdfjs/
