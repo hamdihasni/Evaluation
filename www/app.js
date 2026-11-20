@@ -657,6 +657,37 @@ function errorsHtml(g) {
   <button class="btn" data-act="adderr" data-g="${g}">+ Ajouter une erreur</button></div>`;
 }
 
+/* ---------- Classement automatique des élèves dans les groupes du bilan ----------
+   Groupe 1 = élèves faibles (--- ou --+) au 1er critère minimal ; un élève qui a -++ ou +++ passe au groupe
+   suivant où il est faible. Un élève faible dans plusieurs critères n'apparaît que dans le PREMIER.
+   Recette : conj → difficultés (✗). S'il y a plus de critères que de groupes, le dernier groupe reçoit les critères restants. */
+const isWeak = (g, sid, key) => g === 'conj' ? ((S.conj.marks[sid] || {})[key] === 'ko') : (critLv(g, sid, key) === '---' || critLv(g, sid, key) === '--+');
+const autoItems = g => g === 'conj'
+  ? [0, 1, 2].map(i => { const t = String((S.conj.diffs || [])[i] || '').trim(); return { key: 'd' + i, label: 'Difficulté ' + (i + 1) + (t ? ' : ' + t.slice(0, 50) : '') }; })
+  : GRIDS[g].crit.filter(c => c.min).map(c => ({ key: c.c, label: critLabel(c) }));
+const groupsEmpty = g => (S[g].groups || []).every(x => !String(x.noms || '').trim() && !String(x.crit || '').trim());
+function autoGroups(g, force) {
+  const sk = S[g]; if (!sk || !sk.groups) return false;
+  if (!force && !(sk.autoGrp === true || (sk.autoGrp === undefined && groupsEmpty(g)))) return false;
+  const items = autoItems(g), n = sk.groups.length, gi = k => Math.min(k, n - 1);
+  const names = Array.from({ length: n }, () => []), crits = Array.from({ length: n }, () => new Set());
+  S.students.forEach(st => {
+    if (!st.nom.trim()) return;
+    const k = items.findIndex(it => isWeak(g, st.id, it.key));
+    if (k < 0) return;                                   // pas de critère non maîtrisé : aucun groupe
+    const grp = gi(k);
+    names[grp].push(st.nom.trim());
+    items.forEach((it, j) => { if (gi(j) === grp && isWeak(g, st.id, it.key)) crits[grp].add(it.label); });
+  });
+  const before = JSON.stringify([sk.groups.map(x => [x.noms, x.crit]), sk.autoGrp]);
+  sk.groups.forEach((gr, i) => { gr.noms = names[i].join(', '); gr.crit = items.filter(it => crits[i].has(it.label)).map(it => it.label).join('\n'); });
+  sk.autoGrp = true;
+  const ch = before !== JSON.stringify([sk.groups.map(x => [x.noms, x.crit]), sk.autoGrp]);
+  if (ch) changed();
+  return ch;
+}
+const manualGrp = path => { const m = /^(\w+)\|groups\|\d+\|(noms|crit)$/.exec(path); if (m && S[m[1]]) S[m[1]].autoGrp = false; };
+
 function stuPickModal(path) {
   const cur = new Set(splitList(getP(path), true).map(x => x.toLowerCase()));
   const rows = S.students.map((s, i) => [s, i]).filter(([s]) => s.nom.trim());
@@ -669,11 +700,13 @@ function stuPickOk(path) {
   const named = new Set(S.students.map(s => s.nom.trim().toLowerCase()).filter(Boolean));
   const keepFree = splitList(getP(path), true).filter(x => !named.has(x.toLowerCase()));   // saisies libres conservées
   const picked = [...document.querySelectorAll('#stu-list input[data-stu]:checked')].map(x => S.students[+x.dataset.stu].nom.trim());
-  setP(path, [...keepFree, ...picked].join(', ')); changed();
+  setP(path, [...keepFree, ...picked].join(', ')); manualGrp(path); changed();
   modal(''); render(true);
 }
 function groupsHtml(path, title, labels, fields, g) {
   const F = { noms: 'Noms et prénoms', crit: 'Critères non maîtrisés', diff: 'Difficultés à traiter', dec: 'Décisions de remédiation' };
+  const isAuto = path.endsWith('|groups');
+  if (isAuto) autoGroups(g);                        // classement automatique tant que les groupes ne sont pas saisis à la main
   const arr = getP(path);
   const stuOpts = S.students.map((s, i) => s.nom.trim()).filter(Boolean);
   const critOpts = g === 'conj'
@@ -681,7 +714,9 @@ function groupsHtml(path, title, labels, fields, g) {
     : GRIDS[g].crit.map(critLabel);
   const picker = (f, i, label, opts) => `<select class="addsel" data-add="${path}|${i}|${f}" aria-label="${esc(label)}">
     <option value="">＋ ${esc(label)}</option>${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
-  return `<div class="card"><h3>${esc(title)}</h3>
+  const autoBar = isAuto ? `<div class="stack"><button type="button" class="btn sec sm" data-act="autogrp" data-g="${g}">🔄 Classer automatiquement selon les niveaux</button></div>
+    <p class="hint">${S[g].autoGrp === false ? 'Mode manuel (vous avez modifié un groupe). Appuyez sur le bouton pour reprendre le classement automatique.' : 'Classement automatique : groupe 1 = élèves avec --- ou --+ au premier critère ; sinon l’élève passe au groupe suivant où il a --- ou --+. Un élève n’est cité que dans son premier critère non maîtrisé.'}</p>` : '';
+  return `<div class="card"><h3>${esc(title)}</h3>${autoBar}
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
     ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${labels[i]}</b></summary>
       ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? `<button type="button" class="btn sec sm" data-act="pickstu" data-path="${path}|${i}|noms">👥 Choisir des élèves (liste numérotée)</button>` : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}
@@ -1534,6 +1569,8 @@ document.addEventListener('input', e => {
   let v = t.value;
   if (t.dataset.max !== undefined) { const n = num(v); v = n == null ? '' : n; }
   setP(t.dataset.b, v);
+  manualGrp(t.dataset.b);
+  { const lm = /^(recit|oral|lect|ecrit)\|clv\|/.exec(t.dataset.b); if (lm) autoGroups(lm[1]); }   // niveau modifié : groupes remis à jour
   if (/\|err\|\d+\|hyp$/.test(t.dataset.b)) setP(t.dataset.b.replace(/hyp$/, 'hypAuto'), 0);   // texte modifié à la main
   changed(); refresh();
 });
@@ -1544,7 +1581,7 @@ document.addEventListener('change', e => {
     const path = t.dataset.add, isName = path.endsWith('|noms');
     const cur = String(getP(path) || '').trim();
     const items = cur.split(isName ? /\s*,\s*|\n/ : /\n/).map(x => x.trim()).filter(Boolean);
-    if (!items.includes(v)) { setP(path, cur ? cur + (isName ? ', ' : '\n') + v : v); changed(); }
+    if (!items.includes(v)) { setP(path, cur ? cur + (isName ? ', ' : '\n') + v : v); manualGrp(path); changed(); }
     const ta = [...document.querySelectorAll('textarea[data-b]')].find(x => x.dataset.b === path);
     if (ta) ta.value = getP(path);
     t.value = ''; return;
@@ -1570,6 +1607,7 @@ document.addEventListener('click', async e => {
   if (a === 'home') return go('home');
   if (a === 'acct') return authModal();
   if (a === 'closemodal') return modal('');
+  if (a === 'autogrp') { autoGroups(el.dataset.g, true); changed(); return render(true); }
   if (a === 'pickstu') return stuPickModal(el.dataset.path);
   if (a === 'pickall' || a === 'picknone') { document.querySelectorAll('#stu-list input[data-stu]').forEach(x => { x.checked = a === 'pickall'; }); return; }
   if (a === 'pickok') return stuPickOk(el.dataset.path);
@@ -1627,7 +1665,7 @@ document.addEventListener('click', async e => {
     const { sid, d } = el.dataset; const m = (S.conj.marks[sid] ||= {});
     m[d] = m[d] === 'ok' ? 'ko' : m[d] === 'ko' ? '' : 'ok';
     el.className = 'tog ' + m[d]; el.textContent = m[d] === 'ok' ? '✓' : m[d] === 'ko' ? '✗' : '·';
-    changed(); refresh();
+    changed(); autoGroups('conj'); refresh();
   }
 });
 
