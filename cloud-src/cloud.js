@@ -5,7 +5,8 @@ import {
   createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 import {
-  initializeFirestore, persistentLocalCache, doc, getDoc, getDocFromCache, setDoc
+  initializeFirestore, persistentLocalCache, doc, getDoc, getDocFromCache, setDoc,
+  onSnapshot, runTransaction
 } from 'firebase/firestore';
 import { firebaseConfig } from './firebase-config.js';
 
@@ -36,4 +37,23 @@ export async function pull(uid) {
 }
 export async function push(uid, json, updatedAt) {
   await setDoc(doc(db, 'dossiers', uid), { data: json, updatedAt, schema: 1 });
+}
+
+// Écoute en temps réel : le PC et le téléphone se mettent à jour dès que l'un des deux enregistre.
+export function listen(uid, cb, onErr) {
+  return onSnapshot(doc(db, 'dossiers', uid),
+    snap => { if (snap.metadata.hasPendingWrites) return; cb(snap.exists() ? snap.data() : null, snap.metadata.fromCache); },
+    e => { if (onErr) onErr(e); });
+}
+// Synchronisation sûre : lecture + fusion + écriture dans UNE transaction, pour ne jamais écraser
+// les modifications faites entre-temps depuis un autre appareil. mergeFn(remote) doit renvoyer
+// { write, json, updatedAt, ... } ; l'objet est renvoyé tel quel à l'appelant.
+export async function sync(uid, mergeFn, device) {
+  const ref = doc(db, 'dossiers', uid);
+  return runTransaction(db, async tx => {
+    const s = await tx.get(ref);
+    const res = mergeFn(s.exists() ? s.data() : null);
+    if (res && res.write) tx.set(ref, { data: res.json, updatedAt: res.updatedAt, schema: 2, by: device || '' });
+    return res;
+  });
 }
