@@ -163,18 +163,17 @@ export async function exportPdf(model, o) {
     }));
     return look;
   }
-  function table(b) {
-    ensure(28);
+  // options autoTable d'un tableau (taille de police et marges internes variables pour l'ajustement)
+  function tblOpts(b, startY, fs, pad, look, drawn) {
     const left = b.align === 'left';
-    const look = b.imgCol != null ? prepImgs(b) : null, drawn = new Set();
-    autoTable(doc, {
-      startY: y,
+    return {
+      startY,
       head: b.head.map(r => r.map(cell)),
       body: b.body.map(r => r.map(cell)),
       foot: b.foot ? b.foot.map(r => r.map(cell)) : undefined,
       showHead: 'everyPage', showFoot: 'lastPage', theme: 'grid',
       margin: { left: M, right: M, top: M, bottom: M + 6 },
-      styles: { font, fontSize: base * .85, cellPadding: 1.3, halign: left ? 'left' : 'center', valign: 'middle',
+      styles: { font, fontSize: fs, cellPadding: pad, halign: left ? 'left' : 'center', valign: 'middle',
         lineColor: [190, 198, 215], lineWidth: .2, textColor: ink, overflow: 'linebreak', minCellHeight: b.minH || 0 },
       headStyles: { fillColor: pri, textColor: onPri, fontStyle: 'bold', halign: 'center' },
       footStyles: { fillColor: soft, textColor: ink, fontStyle: 'bold' },
@@ -188,7 +187,27 @@ export async function exportPdf(model, o) {
           try { doc.addImage(p.data, 'JPEG', d.cell.x + p.x, d.cell.y + o.txtH + p.y, p.w, p.h); } catch (e) { /* image ignorée */ }
         }
       }
-    });
+    };
+  }
+  // grilles : cherche la plus grande police pour que tout le tableau tienne sur UNE page (essai sur un document temporaire)
+  function fitParams(b, startY) {
+    const ori = W > H ? 'landscape' : 'portrait';
+    for (let fs = base * .85; fs >= 4.4; fs -= .3) {
+      const pad = Math.max(.3, Math.min(1.3, fs * .16));
+      const tmp = new jsPDF({ orientation: ori, unit: 'mm', format: 'a4' });
+      try { autoTable(tmp, tblOpts(b, startY, fs, pad, null, null)); } catch (e) { return null; }
+      if (tmp.getNumberOfPages() === 1 && tmp.lastAutoTable.finalY <= H - M - 6) return { fs, pad };
+    }
+    return null;
+  }
+  function table(b) {
+    let fp = null;
+    if (b.fit) {
+      fp = fitParams(b, y);
+      if (!fp && y > M + 1) { newPage(); fp = fitParams(b, y); }      // pas assez de place sous le texte : nouvelle page
+    } else ensure(28);
+    const look = b.imgCol != null ? prepImgs(b) : null, drawn = new Set();
+    autoTable(doc, tblOpts(b, y, fp ? fp.fs : base * .85, fp ? fp.pad : 1.3, look, drawn));
     y = doc.lastAutoTable.finalY + 6;
     // filet de sécurité : images qui n'ont pas pu être dessinées dans leur cellule
     if (look) for (const [k, o] of look) if (!drawn.has(k)) images({ label: 'Images jointes (suite)', list: o.list });
@@ -214,7 +233,14 @@ export async function exportPdf(model, o) {
   for (const b of model.blocks) {
     if (b.t === 'cover') { if (b !== model.blocks[0]) newPage('portrait'); coverPages.add(doc.getNumberOfPages()); drawCover(b); y = H; }
     else if (b.t === 'h1') { if (b.newPage && y > M) newPage(); heading(b.text, 1); }
-    else if (b.t === 'h2') heading(b.text, 2);
+    else if (b.t === 'h2') {
+      const nx = model.blocks[model.blocks.indexOf(b) + 1];
+      if (nx && nx.t === 'table' && nx.fit && y > M + 1) {          // le titre reste avec sa grille
+        const hh = base * 1.2 * PT * 1.25 + 3.5;
+        if (!fitParams(nx, y + hh)) newPage();
+      }
+      heading(b.text, 2);
+    }
     else if (b.t === 'kv') paragraph(b.text, b.label);
     else if (b.t === 'p') paragraph(b.text);
     else if (b.t === 'table') table(b);

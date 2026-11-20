@@ -80,22 +80,66 @@ function merge(base, src) {
 }
 
 const newId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-const defaultDB = () => ({ v: 2, updatedAt: 0, cur: 'c1', order: ['c1'], classes: { c1: defaultState() } });
+const SECT = ['meta', 'students', 'recit', 'oral', 'lect', 'ecrit', 'conj'];
+// horodatage par rubrique (ts) : permet de fusionner les modifications faites sur le PC et sur le téléphone
+const fillTs = (c, t) => { c.ts = { ...(c.ts || {}) }; for (const k of SECT) if (c.ts[k] == null) c.ts[k] = t; return c; };
+const defaultDB = () => ({ v: 2, updatedAt: 0, cur: 'c1', order: ['c1'], del: {}, classes: { c1: fillTs(defaultState(), 0) } });
 // accepte l'ancien format (une seule classe) comme le nouveau (plusieurs classes)
 function normDB(raw) {
   if (raw && raw.classes && Array.isArray(raw.order)) {
-    const db = { v: 2, updatedAt: raw.updatedAt || 0, cur: raw.cur, order: raw.order.filter(id => raw.classes[id]), classes: {} };
+    const db = { v: 2, updatedAt: raw.updatedAt || 0, cur: raw.cur, order: raw.order.filter(id => raw.classes[id]), del: { ...(raw.del || {}) }, classes: {} };
     if (!db.order.length) return defaultDB();
-    for (const id of db.order) db.classes[id] = merge(defaultState(), raw.classes[id]);
+    for (const id of db.order) db.classes[id] = fillTs(merge(defaultState(), raw.classes[id]), db.updatedAt);
     if (!db.classes[db.cur]) db.cur = db.order[0];
     return db;
   }
-  if (raw && raw.students) return { v: 2, updatedAt: raw.updatedAt || 0, cur: 'c1', order: ['c1'], classes: { c1: merge(defaultState(), raw) } };
+  if (raw && raw.students) return { v: 2, updatedAt: raw.updatedAt || 0, cur: 'c1', order: ['c1'], del: {}, classes: { c1: fillTs(merge(defaultState(), raw), raw.updatedAt || 0) } };
   return defaultDB();
 }
 let DB = defaultDB();
 let S = DB.classes[DB.cur];
-const setDB = db => { DB = db; S = DB.classes[DB.cur]; };
+let SNAP = {};   // contenu de chaque rubrique au dernier horodatage
+const setDB = db => { DB = db; S = DB.classes[DB.cur]; SNAP = {}; for (const id of DB.order) { const c = DB.classes[id]; SNAP[id] = {}; for (const k of SECT) SNAP[id][k] = JSON.stringify(c[k]); } };
+setDB(DB);   // instantané initial (évite qu'un dossier vierge soit vu comme « récent »)
+// met à jour l'horodatage des rubriques modifiées depuis le dernier passage
+function stamp() {
+  const now = Date.now();
+  for (const id of DB.order) {
+    const c = DB.classes[id]; if (!c) continue;
+    c.ts = c.ts || {};
+    const fresh = !SNAP[id], sn = SNAP[id] = SNAP[id] || {};
+    for (const k of SECT) { const j = JSON.stringify(c[k]); if (fresh || sn[k] !== j) { c.ts[k] = now; sn[k] = j; } }
+  }
+}
+// signature : deux états ayant la même signature ont le même contenu
+const sigDB = db => JSON.stringify([[...db.order].sort(), Object.entries(db.del || {}).sort(),
+  [...db.order].sort().map(id => SECT.map(k => (db.classes[id].ts || {})[k] || 0))]);
+// fusion rubrique par rubrique : la version la plus récente de chaque rubrique l'emporte
+function mergeDB(loc, rem) {
+  const del = { ...(rem.del || {}) };
+  for (const [id, v] of Object.entries(loc.del || {})) del[id] = Math.max(del[id] || 0, v);
+  const ids = [...loc.order, ...rem.order.filter(id => !loc.order.includes(id))];
+  const out = { v: 2, updatedAt: Math.max(loc.updatedAt || 0, rem.updatedAt || 0), cur: loc.cur, order: [], del: {}, classes: {} };
+  for (const id of ids) {
+    const a = loc.classes[id], b = rem.classes[id];
+    let c;
+    if (a && b) {
+      c = { ...a, ts: {} };
+      for (const k of SECT) {
+        const ta = (a.ts || {})[k] || 0, tb = (b.ts || {})[k] || 0;
+        const useB = tb > ta || (tb === ta && JSON.stringify(b[k]) > JSON.stringify(a[k]));   // égalité : choix déterministe
+        c[k] = useB ? b[k] : a[k]; c.ts[k] = Math.max(ta, tb);
+      }
+    } else c = a || b;
+    const act = Math.max(0, ...Object.values(c.ts || {}));
+    if (del[id] && del[id] >= act) continue;   // classe supprimée sur un appareil
+    out.order.push(id); out.classes[id] = c;
+  }
+  for (const [id, v] of Object.entries(del)) if (!out.classes[id]) out.del[id] = v;
+  if (!out.order.length) return loc;
+  if (!out.classes[out.cur]) out.cur = out.order[0];
+  return out;
+}
 let user = null, status = 'local', skipAuth = false, authReady = false;
 let view = { sec: 'home', tab: 0 };
 
@@ -110,7 +154,7 @@ function loadLocal() {
 }
 let owner = loadLocal();
 skipAuth = localStorage.getItem('dossier5.skip') === '1';
-const saveLocal = () => { try { localStorage.setItem(LS2, JSON.stringify({ owner, db: DB })); } catch (e) { /* quota */ } };
+const saveLocal = () => { stamp(); try { localStorage.setItem(LS2, JSON.stringify({ owner, db: DB })); } catch (e) { /* quota */ } };
 
 /* =====================================================================
    3. OUTILS
@@ -613,6 +657,21 @@ function errorsHtml(g) {
   <button class="btn" data-act="adderr" data-g="${g}">+ Ajouter une erreur</button></div>`;
 }
 
+function stuPickModal(path) {
+  const cur = new Set(splitList(getP(path), true).map(x => x.toLowerCase()));
+  const rows = S.students.map((s, i) => [s, i]).filter(([s]) => s.nom.trim());
+  modal(`<h2>👥 Choisir des élèves</h2><p class="hint">Cochez un ou plusieurs élèves (numéro = numéro dans la liste de la classe).</p>
+    <div class="stack"><button class="btn sec sm" data-act="pickall">Tout cocher</button><button class="btn sec sm" data-act="picknone">Tout décocher</button></div>
+    <div id="stu-list">${rows.map(([s, i]) => `<label class="chk"><input type="checkbox" data-stu="${i}" ${cur.has(s.nom.trim().toLowerCase()) ? 'checked' : ''}> <b>${i + 1}.</b> ${esc(s.nom)}</label>`).join('') || '<p class="hint">Saisissez d’abord les noms dans la rubrique « Élèves ».</p>'}</div>
+    <div class="stack"><button class="btn" data-act="pickok" data-path="${esc(path)}">Valider</button><button class="btn sec" data-act="closemodal">Annuler</button></div>`);
+}
+function stuPickOk(path) {
+  const named = new Set(S.students.map(s => s.nom.trim().toLowerCase()).filter(Boolean));
+  const keepFree = splitList(getP(path), true).filter(x => !named.has(x.toLowerCase()));   // saisies libres conservées
+  const picked = [...document.querySelectorAll('#stu-list input[data-stu]:checked')].map(x => S.students[+x.dataset.stu].nom.trim());
+  setP(path, [...keepFree, ...picked].join(', ')); changed();
+  modal(''); render(true);
+}
 function groupsHtml(path, title, labels, fields, g) {
   const F = { noms: 'Noms et prénoms', crit: 'Critères non maîtrisés', diff: 'Difficultés à traiter', dec: 'Décisions de remédiation' };
   const arr = getP(path);
@@ -625,7 +684,7 @@ function groupsHtml(path, title, labels, fields, g) {
   return `<div class="card"><h3>${esc(title)}</h3>
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
     ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${labels[i]}</b></summary>
-      ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? picker(f, i, 'Choisir un élève', stuOpts) : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}
+      ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? `<button type="button" class="btn sec sm" data-act="pickstu" data-path="${path}|${i}|noms">👥 Choisir des élèves (liste numérotée)</button>` : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}
       ${(fields.includes('diff') || fields.includes('dec')) ? `<div class="stack"><button class="btn sec sm" data-act="aisug" data-g="${g}" data-path="${path}" data-i="${i}" data-fields="${fields.join(',')}">🤖 Suggérer difficultés et remédiation</button></div>
       <div class="hint" id="sug-${path.replace(/\|/g, '-')}-${i}"></div>` : ''}</details>`).join('')}</div>`;
 }
@@ -994,34 +1053,71 @@ const go = (sec, tab = 0) => { view = { sec, tab }; render(); };
 /* =====================================================================
    8. ENREGISTREMENT & CLOUD
    ===================================================================== */
-let tLocal = null, tCloud = null;
+let tLocal = null, tCloud = null, tRem = null, lastErr = '';
+const DEVICE = (() => { let d = ''; try { d = localStorage.getItem('dossier5.dev') || ''; if (!d) { d = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); localStorage.setItem('dossier5.dev', d); } } catch (e) { /* ignore */ } return d || 'd' + Math.random().toString(36).slice(2, 9); })();
 function changed() {
   DB.updatedAt = Date.now();
   clearTimeout(tLocal); tLocal = setTimeout(saveLocal, 250);
   if (user) { setStatus('pend'); clearTimeout(tCloud); tCloud = setTimeout(pushNow, 1500); }
 }
-async function pushNow() {
+const pushNow = () => syncNow();
+// affiche la mise à jour reçue sans interrompre la saisie en cours
+function renderLater() {
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && $('#app').contains(ae)) { setTimeout(renderLater, 1500); return; }
+  render(true);
+}
+let syncing = false, again = false;
+// Synchronisation : fusionne le dossier local avec le cloud (transaction), écrit le résultat,
+// puis applique ici les modifications venues d'un autre appareil.
+async function syncNow() {
   if (!user) return;
-  saveLocal(); setStatus('sync');
-  try { await cloud.push(user.uid, JSON.stringify(DB), DB.updatedAt); setStatus('ok'); } catch (e) { setStatus('err'); }
-}
-async function syncDown() {
-  setStatus('sync');
+  if (syncing) { again = true; return; }
+  syncing = true; clearTimeout(tCloud);
   try {
-    // un autre compte avait utilisé cet appareil : ne pas mélanger les données
-    if (owner && owner !== user.uid) { setDB(defaultDB()); owner = user.uid; saveLocal(); render(true); }
-    const r = await cloud.pull(user.uid);
-    owner = user.uid;
-    if (r && r.data) {
-      const remote = normDB(JSON.parse(r.data)), keep = DB.cur;
-      if ((remote.updatedAt || 0) > (DB.updatedAt || 0)) {
-        setDB(remote); if (remote.classes[keep]) { DB.cur = keep; S = DB.classes[keep]; }
-        saveLocal(); render(); setStatus('ok'); return;
+    do {
+      again = false; setStatus('sync');
+      if (owner && owner !== user.uid) { setDB(defaultDB()); owner = user.uid; saveLocal(); render(true); }
+      saveLocal();
+      const res = await cloud.sync(user.uid, remote => {
+        stamp();
+        let m = DB;
+        if (remote && remote.data) { try { m = mergeDB(DB, normDB(JSON.parse(remote.data))); } catch (e) { m = DB; } }
+        const json = JSON.stringify(m);
+        if (json.length > 950000) throw new Error('Dossier trop volumineux pour le cloud (limite 1 Mo).');
+        let write = true;
+        if (remote && remote.data) { try { write = sigDB(m) !== sigDB(normDB(JSON.parse(remote.data))); } catch (e) { write = true; } }
+        return { write, json, updatedAt: m.updatedAt, m, ua: DB.updatedAt };
+      }, DEVICE);
+      owner = user.uid;
+      if (res && res.m) {
+        if (DB.updatedAt !== res.ua) again = true;               // modifié pendant la synchro : on refait un tour
+        else if (sigDB(res.m) !== sigDB(DB)) {
+          const keep = DB.cur;
+          setDB(res.m); if (DB.classes[keep]) { DB.cur = keep; S = DB.classes[keep]; }
+          saveLocal(); renderLater();
+        }
       }
-    }
-    await pushNow();
-  } catch (e) { setStatus('err'); }
+      lastErr = '';
+    } while (again);
+    setStatus('ok');
+  } catch (e) {
+    lastErr = (e && (e.code || e.message)) ? String(e.code || e.message) : 'erreur';
+    setStatus(navigator.onLine === false ? 'err' : 'err');
+  } finally { syncing = false; }
 }
+// écoute en temps réel : dès qu'un autre appareil enregistre, on fusionne
+let unlisten = null;
+function startListen() {
+  stopListen();
+  try {
+    unlisten = cloud.listen(user.uid, data => {
+      if (data && data.by === DEVICE) return;      // écho de notre propre écriture
+      clearTimeout(tRem); tRem = setTimeout(syncNow, 400);
+    }, e => { lastErr = String((e && (e.code || e.message)) || 'écoute impossible'); });
+  } catch (e) { /* ignore */ }
+}
+function stopListen() { if (unlisten) { try { unlisten(); } catch (e) { /* ignore */ } unlisten = null; } }
 
 /* =====================================================================
    9. COMPTE (modal)
@@ -1040,7 +1136,7 @@ function authModal(msg = '', ok = false) {
     return modal(`<h2>Cloud non configuré</h2><p class="hint">Les données sont enregistrées <b>sur cet appareil uniquement</b>. Pour activer la sauvegarde cloud, renseignez <code>cloud-src/firebase-config.js</code> puis reconstruisez l’application (voir LISEZMOI).</p><button class="btn" data-act="closemodal">OK</button>`);
   }
   if (user) {
-    return modal(`<h2>Compte</h2><p class="hint">Connecté : <b>${esc(user.email)}</b><br>Vos données sont sauvegardées dans le cloud et disponibles sur tous vos appareils.</p>
+    return modal(`<h2>Compte</h2><p class="hint">Connecté : <b>${esc(user.email)}</b><br>Vos données sont sauvegardées dans le cloud et disponibles sur tous vos appareils (fusion automatique PC ↔ téléphone).</p>${lastErr ? `<div class="msg">Dernière erreur de synchro : ${esc(lastErr)}</div>` : ''}
       <div class="stack"><button class="btn" data-act="syncnow">Synchroniser maintenant</button><button class="btn red" data-act="logout">Se déconnecter</button><button class="btn sec" data-act="closemodal">Fermer</button></div>`);
   }
   modal(`<h2>☁️ Sauvegarde cloud</h2><p class="hint">Connectez-vous pour enregistrer le dossier dans le cloud et le retrouver sur tout appareil.</p>
@@ -1096,7 +1192,7 @@ function addClass() {
 function delClass(id) {
   if (DB.order.length < 2 || !DB.classes[id]) return;
   if (!confirm(`Supprimer définitivement la classe « ${DB.classes[id].meta.classe} » avec tous ses élèves et ses notes ?`)) return;
-  DB.order = DB.order.filter(x => x !== id); delete DB.classes[id];
+  DB.order = DB.order.filter(x => x !== id); delete DB.classes[id]; DB.del = DB.del || {}; DB.del[id] = Date.now(); delete SNAP[id];
   if (DB.cur === id) { DB.cur = DB.order[0]; S = DB.classes[DB.cur]; }
   changed(); classModal(); render(true);
 }
@@ -1224,7 +1320,7 @@ function gridModel(g) {
   const foot = [
     [{ c: 'Élèves ayant atteint les critères minimaux', colSpan: sp }, ...st.map(x => (x.tot ? String(x.n) : ''))],
     [{ c: '%', colSpan: sp }, ...st.map(x => (x.tot ? Math.round(100 * x.n / x.tot) + ' %' : ''))]];
-  return { t: 'table', head: [h1, h2], body, foot, firstW: 34 };
+  return { t: 'table', head: [h1, h2], body, foot, firstW: 34, fit: true };
 }
 const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
   head: [['Nom et prénom', 'Erreur', 'Critère concerné', 'Type de l’erreur', 'Hypothèses explicatives']],
@@ -1339,7 +1435,7 @@ function buildModel(sel) {
     UP('conj');
     d.forEach(i => KV('Difficulté n°' + (i + 1), c.diffs[i]));
     const pct = k => { let ok = 0, tot = 0; for (const st of S.students) { const v = (c.marks[st.id] || {})[k]; if (v === 'ok') { ok++; tot++; } else if (v === 'ko') tot++; } return tot ? Math.round(100 * ok / tot) + ' %' : ''; };
-    B.push({ t: 'table', align: 'center', firstW: 40,
+    B.push({ t: 'table', align: 'center', firstW: 40, fit: true,
       head: [['Élève', ...d.map(i => 'Diff. ' + (i + 1))]],
       body: S.students.map((s, i) => [stuLabel(s, i), ...d.map(k => { const v = (c.marks[s.id] || {})['d' + k]; return v === 'ok' ? 'V' : v === 'ko' ? 'X' : ''; })]),
       foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
@@ -1474,6 +1570,9 @@ document.addEventListener('click', async e => {
   if (a === 'home') return go('home');
   if (a === 'acct') return authModal();
   if (a === 'closemodal') return modal('');
+  if (a === 'pickstu') return stuPickModal(el.dataset.path);
+  if (a === 'pickall' || a === 'picknone') { document.querySelectorAll('#stu-list input[data-stu]').forEach(x => { x.checked = a === 'pickall'; }); return; }
+  if (a === 'pickok') return stuPickOk(el.dataset.path);
   if (a === 'classes') return classModal();
   if (a === 'selcls') return switchClass(el.dataset.id);
   if (a === 'delcls') return delClass(el.dataset.id);
@@ -1488,7 +1587,7 @@ document.addEventListener('click', async e => {
   if (a === 'skip') { skipAuth = true; localStorage.setItem('dossier5.skip', '1'); return modal(''); }
   if (a === 'login' || a === 'register' || a === 'resetpw') return authDo(a);
   if (a === 'logout') { await cloud.logout(); modal(''); return; }
-  if (a === 'syncnow') { modal(''); return syncDown(); }
+  if (a === 'syncnow') { modal(''); return syncNow(); }
   if (a === 'addstu') { S.students.push({ id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), nom: '', naiss: '', sexe: '' }); changed(); return render(true); }
   if (a === 'delstu') {
     const i = +el.dataset.i, s = S.students[i];
@@ -1579,7 +1678,10 @@ document.addEventListener('change', async e => {
     if (bad) { const b = $(`#rafmsg-${g}-${i}`); if (b) b.textContent = bad; }
   }
 });
-window.addEventListener('online', () => { if (user) pushNow(); });
+window.addEventListener('online', () => { if (user) syncNow(); });
+document.addEventListener('visibilitychange', () => { if (user && document.visibilityState === 'visible') syncNow(); });
+window.addEventListener('focus', () => { if (user) syncNow(); });
+setInterval(() => { if (user && document.visibilityState === 'visible') syncNow(); }, 120000);
 // bouton "retour" Android (plugin @capacitor/app)
 try {
   const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
@@ -1598,6 +1700,6 @@ if (cloud.available) status = 'local';
 cloud.onUser(async u => {
   const first = !authReady; authReady = true;
   user = u;
-  if (u) { render(true); modal(''); await syncDown(); }
-  else { setStatus('local'); render(true); if (first && cloud.available && !skipAuth) authModal(); }
+  if (u) { render(true); modal(''); startListen(); await syncNow(); }
+  else { stopListen(); setStatus('local'); render(true); if (first && cloud.available && !skipAuth) authModal(); }
 });

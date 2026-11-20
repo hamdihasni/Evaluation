@@ -5,3 +5,4 @@ export const onUser = cb => { cb(null); return () => {}; };
 export const login = async () => {}; export const register = async () => {};
 export const logout = async () => {}; export const reset = async () => {};
 export const pull = async () => null; export const push = async () => {};
+export const listen = () => () => {}; export const sync = async () => null;
