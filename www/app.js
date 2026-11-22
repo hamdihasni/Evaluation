@@ -23,7 +23,7 @@ const GRIDS = {
     { c: 'C3', t: 'Vocabulaire', d: 'Compréhension du sens des mots dans le contexte.', min: 1, max: 3 },
     { c: 'C4', t: 'Justification', d: 'Capacité à prouver ses réponses en s’appuyant sur le texte.', min: 1, max: 3 },
     { c: 'C5', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 3 },
-    { c: 'C6', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 2 }] },
+    { c: 'C6', t: 'Perfectionnement', d: 'Donner un avis personnel, proposer un autre titre, imaginer une fin…', min: 0, max: 2 }] },
   ecrit: { total: 20, pre: null, crit: [
     { c: 'C1', t: 'Adéquation de la production', d: 'Respect de la consigne, du type de texte et de la situation de communication.', min: 1, max: 3 },
     { c: 'C2', t: 'Lisibilité', d: 'Écriture claire et compréhensible.', min: 1, max: 1.5 },
@@ -366,7 +366,7 @@ const HYP_CRIT = {
     C3: { _: 'Sens du mot non connu dans le contexte : lexique insuffisant.' },
     C4: { _: 'Difficulté à justifier : l’élève ne revient pas au texte pour prouver sa réponse.' },
     C5: { _: 'Fluidité et expressivité à développer : lectures répétées de textes connus.' },
-    C6: { _: 'Fluidité et expressivité à développer : lectures répétées de textes connus.' },
+    C6: { _: 'Prise de recul sur le texte limitée : difficulté à donner un avis personnel, un autre titre ou à imaginer une fin.' },
     Voc: { _: 'Sens du mot non connu dans le contexte : lexique insuffisant.' },
     Comp: { _: 'Compréhension du texte à guider : de l’explicite vers l’implicite.' }
   }
@@ -553,7 +553,7 @@ const SUG_REM = {
     C3: 'Chercher le sens des mots dans le contexte ; classer les mots ; utiliser le dictionnaire.',
     C4: 'Répondre en citant la phrase du texte qui le prouve (« Où l’as-tu lu ? »).',
     C5: 'Lectures chronométrées de textes connus ; lecture expressive avec intonation.',
-    C6: 'Lectures chronométrées de textes connus ; lecture expressive avec intonation.',
+    C6: 'Inviter à donner son avis et à le justifier ; proposer un autre titre ; imaginer une fin ou une suite du texte.',
     Voc: 'Chercher le sens des mots dans le contexte ; utiliser le dictionnaire.',
     Comp: 'Questions de compréhension guidées, de l’explicite vers l’implicite.'
   }
@@ -570,7 +570,7 @@ const splitList = (t, names) => String(t || '').split(names ? /\s*,\s*|\n/ : /\n
 
 function sugBuild(g, gr) {
   const names = splitList(gr.noms, true).map(n => n.toLowerCase());
-  const errs = (S[g].err || []).filter(e => names.includes(String(e.eleve || '').trim().toLowerCase()));
+  const errs = (S[g].err || []).filter(e => splitList(e.eleve, true).some(x => names.includes(x.toLowerCase())));
   let lines = splitList(gr.crit);
   if (!lines.length && g !== 'conj') lines = [...new Set(errs.map(e => e.crit).filter(Boolean))];   // à défaut : critères des erreurs du groupe
   if (!lines.length && !errs.length) return null;
@@ -596,7 +596,7 @@ function sugBuild(g, gr) {
 // contexte d'un groupe pour l'IA (sans aucun nom d'élève)
 function grpContext(g, gr, all) {
   const names = splitList(gr.noms, true).map(n => n.toLowerCase());
-  const errs = (S[g].err || []).filter(e => all || names.includes(String(e.eleve || '').trim().toLowerCase()));
+  const errs = (S[g].err || []).filter(e => all || splitList(e.eleve, true).some(x => names.includes(x.toLowerCase())));
   let raw = splitList(gr.crit);
   if (!raw.length && g !== 'conj') raw = [...new Set(errs.map(e => e.crit).filter(Boolean))];
   const lines = raw.map(l => {
@@ -642,7 +642,7 @@ function errorsHtml(g) {
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
   <div class="card"><h3>Recensement et classification des erreurs</h3>
   ${list.map((e, i) => `<div class="errcard">${e.ia ? '<p class="hint" style="margin:0 0 6px">🤖 Détectée automatiquement — à vérifier</p>' : ''}
-    <label class="f"><span>Nom & prénom (élève)</span><input list="dl-stu" data-b="${g}|err|${i}|eleve" value="${esc(e.eleve)}"></label>
+    <label class="f"><span>Nom & prénom (élève)</span><button type="button" class="btn sec sm" data-act="pickstu" data-path="${g}|err|${i}|eleve">👥 Choisir des élèves (liste numérotée)</button><input list="dl-stu" data-b="${g}|err|${i}|eleve" value="${esc(e.eleve)}" placeholder="Un ou plusieurs élèves, séparés par une virgule"></label>
     <label class="f"><span>Erreur</span><textarea rows="2" data-b="${g}|err|${i}|erreur">${esc(e.erreur)}</textarea></label>
     <div class="row2">
       <label class="f"><span>Critère concerné</span><select data-b="${g}|err|${i}|crit"><option value="">–</option>${(() => {
@@ -804,7 +804,7 @@ const CRIT_REM = {
     C1: { acts: ['ortho'], kw: 'sons graphies voyelles consonnes' },
     C2: { acts: ['ecrit'], kw: 'question répondre' },
     C3: { acts: ['ecrit'], kw: 'vocabulaire substituts' }, Voc: { acts: ['ecrit'], kw: 'vocabulaire substituts' },
-    C4: { acts: ['ecrit'], kw: 'question répondre' }, Comp: { acts: ['ecrit'], kw: 'question répondre récit' } },
+    C4: { acts: ['ecrit'], kw: 'question répondre' }, C6: { acts: ['ecrit'], kw: 'récit titre avis fin' }, Comp: { acts: ['ecrit'], kw: 'question répondre récit' } },
   recit: {}
 };
 const ERR_KW = { Orthographique: 'orthographier orthographe homophones graphies', Morphologique: 'accord verbe conjuguer participe pluriel genre',
@@ -820,7 +820,7 @@ function groupSets(g) {
 // une requête par critère non maîtrisé (ou par difficulté), enrichie par les erreurs de ce critère
 function remQueries(g, gr, all) {
   const names = splitList(gr.noms, true).map(n => n.toLowerCase());
-  const errs = (S[g].err || []).filter(e => all || names.includes(String(e.eleve || '').trim().toLowerCase()));
+  const errs = (S[g].err || []).filter(e => all || splitList(e.eleve, true).some(x => names.includes(x.toLowerCase())));
   const lines = g === 'conj' ? splitList(gr.crit) : [...new Set([...splitList(gr.crit), ...errs.map(e => e.crit).filter(Boolean)])];
   const out = [];
   for (const line of lines) {
@@ -1267,6 +1267,7 @@ const FONTS = {
   read:  { label: 'Lisible (Verdana)', css: 'Verdana,Tahoma,Geneva,sans-serif', pdf: 'helvetica' },
   serif: { label: 'Avec empattements (Serif)', css: 'Georgia,"Times New Roman",serif', pdf: 'times' },
   mono:  { label: 'Machine à écrire', css: '"Courier New",Courier,monospace', pdf: 'courier' },
+  cursive: { label: 'Cursive (écriture scolaire)', css: '"Segoe Script","Bradley Hand","Lucida Handwriting","Brush Script MT",cursive', pdf: 'cursive' },
   hand:  { label: 'Manuscrit', css: '"Comic Sans MS","Segoe Print",cursive', pdf: 'helvetica' },
   casual:{ label: 'Décontracté', css: '"Trebuchet MS",casual,sans-serif', pdf: 'helvetica' },
   cond:  { label: 'Condensé', css: '"Arial Narrow","sans-serif-condensed",sans-serif', pdf: 'helvetica' }
@@ -1350,12 +1351,19 @@ const PDF_SECS = [['couv', 'Couverture'], ['eleves', 'Liste des élèves'], ['re
   ['ra_lect', 'Activités de remédiation — Lecture'], ['ra_ecrit', 'Activités de remédiation — Production écrite'],
   ['ra_conj', 'Activités de remédiation — Conjugaison · Grammaire · Orthographe']];
 const pdfSel = Object.fromEntries(PDF_SECS.map(([k]) => [k, true]));
+let pdfCrit = true;   // afficher les critères d'évaluation de toutes les activités
 let pdfOrient = 'landscape';
+let pdfFont = '';   // '' = police choisie dans Apparence ; sinon police propre au PDF
+const PDF_FONTS = [['', 'Comme dans l’application (Apparence)'], ['helvetica', 'Sans-serif (standard)'], ['times', 'Avec empattements (Serif)'],
+  ['courier', 'Machine à écrire'], ['cursive', 'Cursive (écriture scolaire)']];
 
 function pdfModal(msg = '', ok = false) {
   modal(`<h2>🖨️ Imprimer / PDF</h2>
     <p class="hint">Classe : <b>${esc(S.meta.classe)}</b>. Choisissez les rubriques à inclure. Sur Android, le PDF s’ouvre dans le menu de partage : enregistrer, envoyer ou imprimer.</p>
     ${PDF_SECS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-pdfsec="${k}" ${pdfSel[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+    <label class="chk" style="margin-top:8px"><input type="checkbox" data-pdfcrit="1" ${pdfCrit ? 'checked' : ''}> Afficher les critères d’évaluation de toutes les activités</label>
+    <label class="f" style="margin-top:8px"><span>Police d’écriture du PDF</span><select id="pdf-font">
+      ${PDF_FONTS.map(([v, l]) => `<option value="${v}" ${pdfFont === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
     <label class="f" style="margin-top:8px"><span>Orientation de la page</span><select id="pdf-or">
       <option value="landscape" ${pdfOrient === 'landscape' ? 'selected' : ''}>Paysage (recommandé pour les grilles)</option>
       <option value="portrait" ${pdfOrient === 'portrait' ? 'selected' : ''}>Portrait</option></select></label>
@@ -1435,8 +1443,8 @@ function buildModel(sel) {
       head: [['Groupe', 'Critères concernés', 'Activités proposées']], body: rows });
     for (const [lab, list] of over) B.push({ t: 'imgs', label: 'Images jointes (suite) — ' + lab, list });
   };
-  const CRIT = g => { const l = GRIDS[g].crit.filter(cr => cr.t); if (!l.length) return;
-    H2('Critères d’évaluation'); B.push({ t: 'p', text: l.map(cr => `${cr.c} - ${cr.t} (${cr.min ? 'minimal' : 'perfectionnement'}) : ${cr.d}`).join('\n') }); };
+  const CRIT = g => { if (!pdfCrit || !GRIDS[g] || !GRIDS[g].crit.length) return;
+    H2('Critères d’évaluation'); B.push({ t: 'p', text: GRIDS[g].crit.map(cr => `${cr.c}${cr.t ? ' - ' + cr.t : ''} (${cr.min ? 'minimal' : 'perfectionnement'})${cr.d ? ' : ' + cr.d : ''}`).join('\n') }); };
   // unité + performance attendue de l'activité
   const UP = (g, noPerf) => { if (S[g].unite) KV('Unité', 'Unité ' + S[g].unite); if (!noPerf) KV('Performance attendue', S[g].perf); };
 
@@ -1455,7 +1463,7 @@ function buildModel(sel) {
     H1('Récitation — grille');
     UP('recit');
     KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
-    B.push(gridModel('recit'));
+    CRIT('recit'); B.push(gridModel('recit'));
     H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
   }
   if (sel.includes('oral')) {
@@ -1571,13 +1579,14 @@ async function makePdf() {
   const sel = PDF_SECS.map(x => x[0]).filter(k => pdfSel[k]);
   if (!sel.length) return msg('Cochez au moins une rubrique.');
   const orSel = $('#pdf-or'); if (orSel) pdfOrient = orSel.value;
+  const fSel = $('#pdf-font'); if (fSel) pdfFont = fSel.value;
   msg('Génération du PDF…', true);
   try {
     const fails = await loadRaImages(sel);
     const mod = await import('./pdf.js');
     const slug = String(S.meta.classe || 'classe').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
     await mod.exportPdf(buildModel(sel), {
-      orientation: pdfOrient, font: FONTS[PREFS.font].pdf, scale: PREFS.size / 16,
+      orientation: pdfOrient, font: pdfFont || FONTS[PREFS.font].pdf, scale: PREFS.size / 16,
       colors: { pri: PREFS.pri, pri2: PREFS.pri2, ink: PREFS.ink },
       fileName: `Dossier_${slug}_${new Date().toISOString().slice(0, 10)}.pdf`
     });
@@ -1726,7 +1735,9 @@ document.addEventListener('input', e => {
   applyPrefs(); savePrefs();
 });
 document.addEventListener('change', e => {
-  const t = e.target; if (!t.dataset || !t.dataset.pdfsec) return;
+  const t = e.target; if (!t.dataset) return;
+  if (t.dataset.pdfcrit) pdfCrit = t.checked;
+  if (!t.dataset.pdfsec) return;
   pdfSel[t.dataset.pdfsec] = t.checked;
 });
 
