@@ -6,6 +6,7 @@ import * as ATmod from 'jspdf-autotable';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { CURSIVE_B64 } from './font-cursive.js';
 
 const autoTable = typeof ATmod.default === 'function' ? ATmod.default : ATmod.autoTable;
 
@@ -25,6 +26,13 @@ export async function exportPdf(model, o) {
   const firstCover = !!(model.blocks[0] && model.blocks[0].t === 'cover');
   // la page de couverture est toujours en portrait ; les autres pages suivent le choix de l'utilisateur
   const doc = new jsPDF({ orientation: firstCover ? 'portrait' : orient, unit: 'mm', format: 'a4' });
+  if (o.font === 'cursive') {   // police cursive intégrée (TTF) : même fichier pour le normal et le gras
+    doc.addFileToVFS('Cursive.ttf', CURSIVE_B64);
+    doc.addFont('Cursive.ttf', 'cursive', 'normal'); doc.addFont('Cursive.ttf', 'cursive', 'bold');
+    doc.setFont('cursive', 'normal');   // vérification : si la police n'est pas reconnue, on le dit au lieu de revenir silencieusement à Helvetica
+    const cur = doc.getFont() || {};
+    if (!/^cursive$/i.test(String(cur.fontName || ''))) throw new Error('police cursive non chargée (fichier cloud-src/font-cursive.js)');
+  }
   const dimsOf = ori => (ori === 'portrait' ? [210, 297] : [297, 210]);
   const coverPages = new Set();   // numéros des pages de couverture (sans pied de page)
   let [W, H] = dimsOf(firstCover ? 'portrait' : orient);
