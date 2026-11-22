@@ -681,7 +681,7 @@ function ensureCons(sk, key) {
   arr.push(newGroup('Consolidation', true)); return true;
 }
 function autoGroups(g, force, key) {
-  key = key || 'groups';
+  key = key || 'groups'; const reset = force === 'reset';
   const sk = S[g], fl = autoFlag(key); if (!sk || !sk[key]) return false;
   const added = ensureCons(sk, key);
   const items = autoItems(g, key), arr = sk[key];
@@ -700,9 +700,26 @@ function autoGroups(g, force, key) {
     names[grp].push(stuName(st, si));
     items.forEach((it, j) => { if (gi(j) === grp && isWeak(g, st.id, it.key)) crits[grp].add(it.label); });
   });
-  const snap = () => JSON.stringify([arr.map(x => [x.noms, x.crit]), sk[fl]]);
+  const snap = () => JSON.stringify([arr.map(x => [x.noms, x.crit, x.an, x.ac]), sk[fl]]);
   const before = snap();
-  arr.forEach((gr, i) => { gr.noms = names[i].join(', '); gr.crit = gr.cons ? '' : items.filter(it => crits[i].has(it.label)).map(it => it.label).join('\n'); });
+  // On fusionne : lignes automatiques à jour + lignes saisies à la main (conservées).
+  // « an » / « ac » = dernières lignes calculées automatiquement ; tout le reste a été ajouté par l'enseignant(e).
+  const lines = (t, sep) => String(t || '').split(sep).map(x => x.trim()).filter(Boolean);
+  const merge = (cur, prev, auto, sep) => {
+    const p = new Set((prev || []).map(x => x.toLowerCase()));
+    const manual = reset ? [] : lines(cur, sep).filter(x => !p.has(x.toLowerCase()));
+    const seen = new Set(auto.map(x => x.toLowerCase()));
+    return [...auto, ...manual.filter(x => !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()))];
+  };
+  arr.forEach((gr, i) => {
+    const autoN = names[i];
+    const autoC = gr.cons ? [] : items.filter(it => crits[i].has(it.label)).map(it => it.label);
+    const prevN = Array.isArray(gr.an) ? gr.an : lines(gr.noms, /\s*,\s*|\n/);   // anciens dossiers : tout était automatique
+    const prevC = Array.isArray(gr.ac) ? gr.ac : lines(gr.crit, '\n');
+    gr.noms = merge(gr.noms, prevN, autoN, /\s*,\s*|\n/).join(', ');
+    gr.crit = gr.cons ? '' : merge(gr.crit, prevC, autoC, '\n').join('\n');
+    gr.an = autoN; gr.ac = autoC;
+  });
   sk[fl] = true;
   const ch = added || before !== snap();
   if (ch) changed();
@@ -738,7 +755,7 @@ function groupsHtml(path, title, labels, fields, g) {
   const picker = (f, i, label, opts) => `<select class="addsel" data-add="${path}|${i}|${f}" aria-label="${esc(label)}">
     <option value="">＋ ${esc(label)}</option>${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
   const autoBar = isAuto ? `<div class="stack"><button type="button" class="btn sec sm" data-act="autogrp" data-g="${g}" data-key="${gkey}">🔄 Classer automatiquement selon les niveaux</button></div>
-    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ». Une saisie manuelle ici est remplacée à la prochaine modification d’un niveau.</p>` : '';
+    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ». Vos ajouts manuels (élèves, critères) sont conservés ; le bouton ci-dessus les remplace par le classement automatique.</p>` : '';
   return `<div class="card"><h3>${esc(title)}</h3>${autoBar}
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
     ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${esc(grLabel(labels, gr, i))}</b></summary>
@@ -1645,7 +1662,7 @@ document.addEventListener('click', async e => {
   if (a === 'home') return go('home');
   if (a === 'acct') return authModal();
   if (a === 'closemodal') return modal('');
-  if (a === 'autogrp') { autoGroups(el.dataset.g, true, el.dataset.key); changed(); return render(true); }
+  if (a === 'autogrp') { if (!confirm('Remplacer les saisies manuelles de ce bilan par le classement automatique ?')) return; autoGroups(el.dataset.g, 'reset', el.dataset.key); changed(); return render(true); }
   if (a === 'addgrp' || a === 'addcons') {
     const [g, key] = el.dataset.path.split('|'), arr = S[g][key];
     if (a === 'addcons') { S[g][consFlag(key)] = false; ensureCons(S[g], key); }
