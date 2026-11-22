@@ -23,8 +23,7 @@ const GRIDS = {
     { c: 'C3', t: 'Vocabulaire', d: 'Compréhension du sens des mots dans le contexte.', min: 1, max: 3 },
     { c: 'C4', t: 'Justification', d: 'Capacité à prouver ses réponses en s’appuyant sur le texte.', min: 1, max: 3 },
     { c: 'C5', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 3 },
-    { c: 'C6', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 2 },
-    { c: 'Voc', name: 'Lec.Voc', min: 0, max: .75 }, { c: 'Comp', name: 'Lec.Comp', min: 0, max: .75 }] },
+    { c: 'C6', t: 'Perfectionnement', d: 'Fluidité remarquable, vitesse de lecture et interprétation expressive.', min: 0, max: 2 }] },
   ecrit: { total: 20, pre: null, crit: [
     { c: 'C1', t: 'Adéquation de la production', d: 'Respect de la consigne, du type de texte et de la situation de communication.', min: 1, max: 3 },
     { c: 'C2', t: 'Lisibilité', d: 'Écriture claire et compréhensible.', min: 1, max: 1.5 },
@@ -44,6 +43,9 @@ const cellsOf = g => g.crit.flatMap(cr => cr.cells
 const GROUPS_4 = ['Groupe 1', 'Groupe 2', 'Groupe 3', 'Groupe 4'];
 const GROUPS_ABCD = ['Groupe A', 'Groupe B', 'Groupe C', 'Groupe D'];
 const LEVELS = ['---', '--+', '-++', '+++'];
+// nom d'un groupe : nom saisi, sinon libellé par défaut (Groupe 1, 2… / A, B…), sinon numéro
+const grLabel = (labels, gr, i) => (gr && gr.name) || labels[i] || (labels === GROUPS_ABCD ? 'Groupe ' + String.fromCharCode(65 + i) : 'Groupe ' + (i + 1));
+const newGroup = (name, cons) => ({ noms: '', crit: '', diff: '', dec: '', ...(name ? { name } : {}), ...(cons ? { cons: true } : {}) });
 // niveau par critère : S[g].clv[idÉlève][critère] (ex. S.lect.clv.s1.C2)
 const critLv = (g, sid, c) => (((S[g].clv || {})[sid]) || {})[c] || '';
 const lvOpts = cur => `<option value="">–</option>${LEVELS.map(l => `<option value="${l}" ${cur === l ? 'selected' : ''}>${l}</option>`).join('')}`;
@@ -662,30 +664,47 @@ function errorsHtml(g) {
    suivant où il est faible. Un élève faible dans plusieurs critères n'apparaît que dans le PREMIER.
    Recette : conj → difficultés (✗). S'il y a plus de critères que de groupes, le dernier groupe reçoit les critères restants. */
 const isWeak = (g, sid, key) => g === 'conj' ? ((S.conj.marks[sid] || {})[key] === 'ko') : (critLv(g, sid, key) === '---' || critLv(g, sid, key) === '--+');
-// lecture : « lecture vocale » ↔ C1 ; « lecture compréhension » ↔ C2, C3, C4
-const LECT_SPLIT = { groups: ['C1'], groupsComp: ['C2', 'C3', 'C4'] };
+const isStrong = (g, sid, key) => g === 'conj' ? ((S.conj.marks[sid] || {})[key] === 'ok') : (critLv(g, sid, key) === '-++' || critLv(g, sid, key) === '+++');
+// critères pris en compte pour le classement :
+//  lecture vocale ↔ C1, C5 ; lecture compréhension ↔ C2, C3, C4, C6 ; production écrite ↔ C1, C2, C5, C6, C7
+const AUTO_CRIT = { lect: { groups: ['C1', 'C5'], groupsComp: ['C2', 'C3', 'C4', 'C6'] }, ecrit: { groups: ['C1', 'C2', 'C5', 'C6', 'C7'] } };
 const autoItems = (g, key) => g === 'conj'
   ? [0, 1, 2].map(i => { const t = String((S.conj.diffs || [])[i] || '').trim(); return { key: 'd' + i, label: 'Difficulté ' + (i + 1) + (t ? ' : ' + t.slice(0, 50) : '') }; })
-  : GRIDS[g].crit.filter(c => c.min && (g !== 'lect' || LECT_SPLIT[key || 'groups'].includes(c.c))).map(c => ({ key: c.c, label: critLabel(c) }));
+  : GRIDS[g].crit.filter(c => { const l = (AUTO_CRIT[g] || {})[key || 'groups']; return l ? l.includes(c.c) : c.min; }).map(c => ({ key: c.c, label: critLabel(c) }));
 const autoFlag = key => (key === 'groupsComp' ? 'autoGrpComp' : 'autoGrp');
+const consFlag = key => (key === 'groupsComp' ? 'consOffComp' : 'consOff');
 const groupsEmpty = (g, key) => (S[g][key || 'groups'] || []).every(x => !String(x.noms || '').trim());
 const stuName = (s, i) => s.nom.trim() || 'E' + (i + 1);      // élève sans nom : on utilise son numéro (E1, E2…)
+// le groupe « Consolidation » (dernier groupe) existe toujours, sauf si l'enseignant l'a supprimé
+function ensureCons(sk, key) {
+  const arr = sk[key]; if (!arr || arr.some(x => x.cons) || sk[consFlag(key)]) return false;
+  arr.push(newGroup('Consolidation', true)); return true;
+}
 function autoGroups(g, force, key) {
   key = key || 'groups';
   const sk = S[g], fl = autoFlag(key); if (!sk || !sk[key]) return false;
-  const items = autoItems(g, key), n = sk[key].length, gi = k => Math.min(k, n - 1);
-  const names = Array.from({ length: n }, () => []), crits = Array.from({ length: n }, () => new Set());
+  const added = ensureCons(sk, key);
+  const items = autoItems(g, key), arr = sk[key];
+  const weakIdx = arr.map((x, i) => (x.cons ? -1 : i)).filter(i => i >= 0), consIdx = arr.findIndex(x => x.cons);
+  const n = weakIdx.length, gi = k => weakIdx[Math.min(k, n - 1)];
+  const names = arr.map(() => []), crits = arr.map(() => new Set());
   S.students.forEach((st, si) => {
     const k = items.findIndex(it => isWeak(g, st.id, it.key));
-    if (k < 0) return;                                   // pas de critère non maîtrisé : aucun groupe
+    if (k < 0) {
+      // -++ ou +++ dans tous les critères : groupe « Consolidation »
+      if (consIdx >= 0 && items.length && items.every(it => isStrong(g, st.id, it.key))) names[consIdx].push(stuName(st, si));
+      return;
+    }
+    if (!n) return;
     const grp = gi(k);
     names[grp].push(stuName(st, si));
     items.forEach((it, j) => { if (gi(j) === grp && isWeak(g, st.id, it.key)) crits[grp].add(it.label); });
   });
-  const before = JSON.stringify([sk[key].map(x => [x.noms, x.crit]), sk[fl]]);
-  sk[key].forEach((gr, i) => { gr.noms = names[i].join(', '); gr.crit = items.filter(it => crits[i].has(it.label)).map(it => it.label).join('\n'); });
+  const snap = () => JSON.stringify([arr.map(x => [x.noms, x.crit]), sk[fl]]);
+  const before = snap();
+  arr.forEach((gr, i) => { gr.noms = names[i].join(', '); gr.crit = gr.cons ? '' : items.filter(it => crits[i].has(it.label)).map(it => it.label).join('\n'); });
   sk[fl] = true;
-  const ch = before !== JSON.stringify([sk[key].map(x => [x.noms, x.crit]), sk[fl]]);
+  const ch = added || before !== snap();
   if (ch) changed();
   return ch;
 }
@@ -719,13 +738,17 @@ function groupsHtml(path, title, labels, fields, g) {
   const picker = (f, i, label, opts) => `<select class="addsel" data-add="${path}|${i}|${f}" aria-label="${esc(label)}">
     <option value="">＋ ${esc(label)}</option>${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
   const autoBar = isAuto ? `<div class="stack"><button type="button" class="btn sec sm" data-act="autogrp" data-g="${g}" data-key="${gkey}">🔄 Classer automatiquement selon les niveaux</button></div>
-    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+). Une saisie manuelle ici est remplacée à la prochaine modification d’un niveau.</p>` : '';
+    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ». Une saisie manuelle ici est remplacée à la prochaine modification d’un niveau.</p>` : '';
   return `<div class="card"><h3>${esc(title)}</h3>${autoBar}
     <p class="hint">Si la difficulté touche la majorité des élèves, les activités de remédiation visent l’ensemble de la classe.</p>
-    ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${labels[i]}</b></summary>
+    ${arr.map((gr, i) => `<details ${i === 0 ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${esc(grLabel(labels, gr, i))}</b></summary>
+      <label class="f"><span>Nom du groupe</span><input data-b="${path}|${i}|name" value="${esc(gr.name || '')}" placeholder="${esc(grLabel(labels, { ...gr, name: '' }, i))}"></label>
       ${fields.map(f => `<label class="f"><span>${F[f]}</span>${f === 'noms' ? `<button type="button" class="btn sec sm" data-act="pickstu" data-path="${path}|${i}|noms">👥 Choisir des élèves (liste numérotée)</button>` : f === 'crit' ? picker(f, i, 'Choisir un critère', critOpts) : ''}<textarea rows="3" data-b="${path}|${i}|${f}">${esc(gr[f])}</textarea></label>`).join('')}
       ${(fields.includes('diff') || fields.includes('dec')) ? `<div class="stack"><button class="btn sec sm" data-act="aisug" data-g="${g}" data-path="${path}" data-i="${i}" data-fields="${fields.join(',')}">🤖 Suggérer difficultés et remédiation</button></div>
-      <div class="hint" id="sug-${path.replace(/\|/g, '-')}-${i}"></div>` : ''}</details>`).join('')}</div>`;
+      <div class="hint" id="sug-${path.replace(/\|/g, '-')}-${i}"></div>` : ''}
+      <div class="stack"><button type="button" class="btn red sm" data-act="delgrp" data-path="${path}" data-i="${i}">🗑 Supprimer ce groupe</button></div></details>`).join('')}
+    <div class="stack"><button type="button" class="btn sm" data-act="addgrp" data-path="${path}" data-g="${g}">＋ Ajouter un groupe</button>
+    ${isAuto && !arr.some(x => x.cons) ? `<button type="button" class="btn sec sm" data-act="addcons" data-path="${path}" data-g="${g}">＋ Groupe Consolidation</button>` : ''}</div></div>`;
 }
 
 const remedHtml = (path, title) => `<div class="card"><h3>${esc(title)}</h3>${field('Situation détaillée', path, { ta: 1, rows: 10 })}</div>`;
@@ -790,7 +813,7 @@ const findCrit = (g, line) => (GRIDS[g] || { crit: [] }).crit.find(c => critLabe
 
 function groupSets(g) {
   const L = g === 'conj' ? GROUPS_ABCD : GROUPS_4, out = [];
-  const add = (arr, pre) => (arr || []).forEach((gr, i) => out.push({ label: pre + L[i], gr }));
+  const add = (arr, pre) => (arr || []).forEach((gr, i) => out.push({ label: pre + grLabel(L, gr, i), gr }));
   if (g === 'lect') { add(S.lect.groups, 'Lecture vocale · '); add(S.lect.groupsComp, 'Compréhension · '); } else add(S[g].groups, '');
   return out;
 }
@@ -1045,10 +1068,10 @@ const SECTIONS = {
       <div class="scroll"><table><thead><tr><th class="sticky">Élève</th>${d.map(i => `<th>Diff. ${i + 1}</th>`).join('')}</tr></thead><tbody>
       ${S.students.map((s, i) => `<tr><td class="sticky">${esc(stuLabel(s, i))}</td>${d.map(k => {
         const m = (S.conj.marks[s.id] || {})['d' + k] || '';
-        return `<td><button class="tog ${m}" data-act="tog" data-sid="${s.id}" data-d="d${k}">${m === 'ok' ? '✓' : m === 'ko' ? '✗' : '·'}</button></td>`;
+        return `<td><button class="tog ${m}" data-act="tog" data-sid="${s.id}" data-d="d${k}">${m === 'ok' ? 'V' : m === 'ko' ? 'X' : '·'}</button></td>`;
       }).join('')}</tr>`).join('')}</tbody>
       <tfoot><tr><td class="sticky">% de réussite</td>${d.map(k => `<td data-calc="cp" data-d="d${k}"></td>`).join('')}</tr></tfoot></table></div>
-      <p class="hint">Touchez une case : ✓ (réussi) → ✗ (non réussi) → vide.</p>`;
+      <p class="hint">Touchez une case : V (réussi, en vert) → X (non réussi, en rouge) → vide.</p>`;
     }],
     ['Bilan', () => groupsHtml('conj|groups', 'Résultats des élèves', GROUPS_ABCD, ['noms', 'crit', 'dec'], 'conj') +
       remedHtml('conj|remed', 'Dispositif de remédiation (conjugaison / grammaire / orthographe)')],
@@ -1365,7 +1388,7 @@ const errModel = g => ({ t: 'table', align: 'left', firstW: 34,
   head: [['Nom et prénom', 'Erreur', 'Critère concerné', 'Type de l’erreur', 'Hypothèses explicatives']],
   body: S[g].err.map(e => [e.eleve, e.erreur, e.crit, e.type, e.hyp]) });
 const grpModel = (arr, labels, fields) => ({ t: 'table', align: 'left', minH: 16, firstW: 22,
-  head: [['Groupe', ...fields.map(f => GF[f])]], body: arr.map((gr, i) => [labels[i], ...fields.map(f => gr[f] || '')]) });
+  head: [['Groupe', ...fields.map(f => GF[f])]], body: arr.map((gr, i) => [grLabel(labels, gr, i), ...fields.map(f => gr[f] || '')]) });
 
 function buildModel(sel) {
   const B = [], m = S.meta;
@@ -1476,7 +1499,7 @@ function buildModel(sel) {
     const pct = k => { let ok = 0, tot = 0; for (const st of S.students) { const v = (c.marks[st.id] || {})[k]; if (v === 'ok') { ok++; tot++; } else if (v === 'ko') tot++; } return tot ? Math.round(100 * ok / tot) + ' %' : ''; };
     B.push({ t: 'table', align: 'center', firstW: 40, fit: true,
       head: [['Élève', ...d.map(i => 'Diff. ' + (i + 1))]],
-      body: S.students.map((s, i) => [stuLabel(s, i), ...d.map(k => { const v = (c.marks[s.id] || {})['d' + k]; return v === 'ok' ? 'V' : v === 'ko' ? 'X' : ''; })]),
+      body: S.students.map((s, i) => [stuLabel(s, i), ...d.map(k => { const v = (c.marks[s.id] || {})['d' + k]; return v === 'ok' ? { c: 'V', lv: 1 } : v === 'ko' ? { c: 'X', lv: 1 } : ''; })]),
       foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
     H2('Résultats des élèves'); B.push(grpModel(c.groups, GROUPS_ABCD, ['noms', 'crit', 'dec']));
     KV('Dispositif de remédiation', c.remed);
@@ -1614,6 +1637,20 @@ document.addEventListener('click', async e => {
   if (a === 'acct') return authModal();
   if (a === 'closemodal') return modal('');
   if (a === 'autogrp') { autoGroups(el.dataset.g, true, el.dataset.key); changed(); return render(true); }
+  if (a === 'addgrp' || a === 'addcons') {
+    const [g, key] = el.dataset.path.split('|'), arr = S[g][key];
+    if (a === 'addcons') { S[g][consFlag(key)] = false; ensureCons(S[g], key); }
+    else { const ci = arr.findIndex(x => x.cons); arr.splice(ci < 0 ? arr.length : ci, 0, newGroup('')); }
+    autoGroups(g, true, key); changed(); return render(true);
+  }
+  if (a === 'delgrp') {
+    const [g, key] = el.dataset.path.split('|'), arr = S[g][key], i = +el.dataset.i, gr = arr[i];
+    if (!gr) return;
+    if (arr.length <= 1) return alert('Il faut garder au moins un groupe.');
+    if (!confirm(`Supprimer le groupe « ${grLabel(g === 'conj' ? GROUPS_ABCD : GROUPS_4, gr, i)} » ?`)) return;
+    if (gr.cons) S[g][consFlag(key)] = true;
+    arr.splice(i, 1); autoGroups(g, true, key); changed(); return render(true);
+  }
   if (a === 'pickstu') return stuPickModal(el.dataset.path);
   if (a === 'pickall' || a === 'picknone') { document.querySelectorAll('#stu-list input[data-stu]').forEach(x => { x.checked = a === 'pickall'; }); return; }
   if (a === 'pickok') return stuPickOk(el.dataset.path);
@@ -1670,7 +1707,7 @@ document.addEventListener('click', async e => {
   if (a === 'tog') {
     const { sid, d } = el.dataset; const m = (S.conj.marks[sid] ||= {});
     m[d] = m[d] === 'ok' ? 'ko' : m[d] === 'ko' ? '' : 'ok';
-    el.className = 'tog ' + m[d]; el.textContent = m[d] === 'ok' ? '✓' : m[d] === 'ko' ? '✗' : '·';
+    el.className = 'tog ' + m[d]; el.textContent = m[d] === 'ok' ? 'V' : m[d] === 'ko' ? 'X' : '·';
     changed(); autoGroups('conj'); refresh();
   }
 });
