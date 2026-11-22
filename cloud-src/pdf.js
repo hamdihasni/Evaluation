@@ -135,7 +135,7 @@ export async function exportPdf(model, o) {
     if (c.colSpan) out.colSpan = c.colSpan;
     if (c.rowSpan) out.rowSpan = c.rowSpan;
     if (c.lv) {   // niveaux : --- et --+ en rouge, -++ / ++- et +++ en vert
-      const bad = /^-{2}/.test(String(c.c));
+      const bad = /^-{2}/.test(String(c.c)) || String(c.c) === 'X';
       out.styles = { textColor: bad ? [200, 0, 0] : [0, 140, 40], fontStyle: 'bold' };
     }
     if (c._lay) out.styles = { valign: 'top', minCellHeight: c._minH };
