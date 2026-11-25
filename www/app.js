@@ -636,8 +636,35 @@ async function sugApply(g, path, i, fields) {
   say((added ? 'Suggestions ajoutées : à relire et adapter.' : 'Rien de nouveau à ajouter.') + note);
 }
 
+/* ---------- Erreurs : le critère choisi cite automatiquement les élèves concernés ----------
+   Un élève est cité au PREMIER critère où il est non maîtrisé (--- ou --+) ; s'il maîtrise ce critère (-++ ou +++),
+   il est cité au critère non maîtrisé suivant. Les noms ajoutés à la main sont conservés. */
+function critStudents(g, code) {
+  if (!code || g === 'conj') return [];
+  let key = 'groups';
+  const ac = AUTO_CRIT[g]; if (ac) { const k = Object.keys(ac).find(k => ac[k].includes(code)); if (k) key = k; }
+  const items = autoItems(g, key), inItems = items.some(it => it.key === code);
+  return S.students.map((st, si) => [st, si]).filter(([st]) => {
+    if (!inItems) return isWeak(g, st.id, code);
+    const k = items.findIndex(it => isWeak(g, st.id, it.key));
+    return k >= 0 && items[k].key === code;
+  }).map(([st, si]) => stuName(st, si));
+}
+function syncErrStudents(g, e) {
+  const code = critCode(g, e.crit); if (!code) return false;
+  const split = t => String(t || '').split(/\s*,\s*|\n/).map(x => x.trim()).filter(Boolean);
+  const auto = critStudents(g, code), prev = new Set((Array.isArray(e.an) ? e.an : []).map(x => x.toLowerCase()));
+  const seen = new Set(auto.map(x => x.toLowerCase()));
+  const manual = split(e.eleve).filter(x => !prev.has(x.toLowerCase()) && !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()));
+  const nv = [...auto, ...manual].join(', ');
+  const ch = nv !== String(e.eleve || '') || JSON.stringify(e.an || []) !== JSON.stringify(auto);
+  e.eleve = nv; e.an = auto;
+  return ch;
+}
+
 function errorsHtml(g) {
   const list = S[g].err;
+  if (list.map(e => syncErrStudents(g, e)).some(Boolean)) changed();   // élèves cités selon la grille
   const recap = g === 'lect' ? errGroupsHtml('lect') + errGroupsHtml('lect', 'groupsComp') : errGroupsHtml(g);
   return aiCardHtml(g) + recap + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
@@ -1702,6 +1729,7 @@ document.addEventListener('change', e => {
   const mm = /^(\w+)\|err\|(\d+)\|(crit|type)$/.exec(t.dataset.b);
   if (mm) {
     const er = S[mm[1]].err[+mm[2]], code = er && critCode(mm[1], er.crit);
+    if (er && mm[3] === 'crit') { syncErrStudents(mm[1], er); changed(); if (!(er.hypAuto && code)) { render(true); return; } }
     if (er && er.hypAuto && code) { er.hyp = hypFor(mm[1], code, er.type || 'Autre', er.erreur); changed(); render(true); return; }
   }
   if (t.dataset.b.startsWith('students|') || t.dataset.b.startsWith('meta|')) { /* libellés mis à jour au prochain affichage */ }
