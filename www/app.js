@@ -638,7 +638,7 @@ async function sugApply(g, path, i, fields) {
 
 function errorsHtml(g) {
   const list = S[g].err;
-  const recap = g === 'lect' ? recapHtml('lect') + recapHtml('lect', 'groupsComp') : recapHtml(g);
+  const recap = g === 'lect' ? errGroupsHtml('lect') + errGroupsHtml('lect', 'groupsComp') : errGroupsHtml(g);
   return aiCardHtml(g) + recap + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
   <div class="card"><h3>Recensement et classification des erreurs</h3>
@@ -753,6 +753,32 @@ function recapHtml(g, key) {
     <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ».</p>
     <div class="scroll"><table><thead><tr><th class="sticky">Élève</th>${items.map(it => `<th class="lvl">${esc(it.label.split(' - ')[0])}</th>`).join('')}<th>Groupe</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p style="margin:8px 0 0">${sums}</p></div>`;
+}
+
+/* ---------- Onglet Erreurs : élèves classés automatiquement en groupes, avec leurs erreurs ---------- */
+function errGroupsHtml(g, key) {
+  key = key || 'groups';
+  if (!S[g] || !S[g][key]) return '';
+  autoGroups(g, false, key);
+  const arr = S[g][key], errs = S[g].err || [];
+  const split = t => String(t || '').split(/\s*,\s*|\n/).map(x => x.trim()).filter(Boolean);
+  const byStu = {}, seen = new Set();
+  errs.forEach(e => split(e.eleve).forEach(nm => { (byStu[nm.toLowerCase()] = byStu[nm.toLowerCase()] || []).push(e); }));
+  const stuHtml = nm => {
+    const l = byStu[nm.toLowerCase()] || []; seen.add(nm.toLowerCase());
+    return `<li><b>${esc(nm)}</b>${l.length ? '<ul style="margin:2px 0 6px">' + l.map(e => `<li>${esc(e.erreur || '…')}${e.crit ? ` <span class="hint">(${esc(e.crit)})</span>` : ''}</li>`).join('') + '</ul>' : ' <span class="hint">— aucune erreur saisie</span>'}</li>`;
+  };
+  const cards = arr.map((gr, i) => {
+    const names = split(gr.noms);
+    return `<details ${names.length ? 'open' : ''} class="card" style="padding:8px 12px"><summary><b>${esc(grLabel(GROUPS_4, gr, i))}</b> <span class="hint">(${names.length} élève${names.length > 1 ? 's' : ''})</span></summary>
+      ${gr.cons ? '' : (gr.crit ? `<p class="hint" style="margin:6px 0">Critères non maîtrisés : ${esc(String(gr.crit).split('\n').filter(Boolean).join(' ; '))}</p>` : '')}
+      ${names.length ? `<ul style="margin:6px 0;padding-left:18px">${names.map(stuHtml).join('')}</ul>` : '<p class="hint">Aucun élève pour le moment.</p>'}</details>`;
+  }).join('');
+  const orphan = Object.keys(byStu).filter(k => !seen.has(k));
+  const orph = orphan.length ? `<details class="card" style="padding:8px 12px"><summary><b>Sans groupe</b> <span class="hint">(niveaux non saisis dans la grille)</span></summary><ul style="margin:6px 0;padding-left:18px">${orphan.map(k => { const e0 = byStu[k][0]; const nm = split(e0.eleve).find(x => x.toLowerCase() === k) || k; return stuHtml(nm); }).join('')}</ul></details>` : '';
+  return `<div class="card"><h3>Classement des élèves par groupe${g === 'lect' ? (key === 'groupsComp' ? ' — compréhension' : ' — lecture vocale') : ''}</h3>
+    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ».</p>
+    ${cards}${orph}</div>`;
 }
 
 function stuPickModal(path) {

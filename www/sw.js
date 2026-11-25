@@ -1,6 +1,6 @@
 // Fonctionnement hors-ligne : réseau d'abord (toujours la dernière version),
 // puis copie en cache si le téléphone n'a pas de connexion.
-const CACHE = 'dossier5-v6';
+const CACHE = 'dossier5-v7';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'cloud.js', 'pdf.js', 'remediation-data.js'];
 
 self.addEventListener('install', e => {
