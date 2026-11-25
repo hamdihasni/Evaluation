@@ -638,7 +638,8 @@ async function sugApply(g, path, i, fields) {
 
 function errorsHtml(g) {
   const list = S[g].err;
-  return aiCardHtml(g) + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
+  const recap = g === 'lect' ? recapHtml('lect') + recapHtml('lect', 'groupsComp') : recapHtml(g);
+  return aiCardHtml(g) + recap + `<datalist id="dl-stu">${S.students.filter(s => s.nom).map(s => `<option value="${esc(s.nom)}">`).join('')}</datalist>
   <datalist id="dl-type">${['Phonologique', 'Lexicale', 'Syntaxique', 'Morphologique', 'Orthographique', 'Sémantique', 'Autre'].map(t => `<option value="${t}">`).join('')}</datalist>
   <div class="card"><h3>Recensement et classification des erreurs</h3>
   ${list.map((e, i) => `<div class="errcard">${e.ia ? '<p class="hint" style="margin:0 0 6px">🤖 Détectée automatiquement — à vérifier</p>' : ''}
@@ -749,7 +750,7 @@ function recapHtml(g, key) {
   }).join('');
   const sums = arr.map((gr, i) => `<span class="chip">${esc(grLabel(labels, gr, i))} : <b>${String(gr.noms || '').split(/\s*,\s*|\n/).filter(Boolean).length}</b></span>`).join(' ');
   return `<div class="card"><h3>Tableau de recensement</h3>
-    <p class="hint">Classement automatique selon les niveaux saisis dans la grille : --- ou --+ dans un critère → groupe de ce critère (le premier critère non maîtrisé décide) ; -++ ou +++ dans tous les critères → Consolidation.</p>
+    <p class="hint">Classement automatique : dès qu’un niveau (---, --+, -++, +++) est saisi dans la grille, l’élève est ajouté au groupe de son premier critère non maîtrisé (--- ou --+) ; un élève ayant -++ ou +++ dans tous les critères va dans « Consolidation ».</p>
     <div class="scroll"><table><thead><tr><th class="sticky">Élève</th>${items.map(it => `<th class="lvl">${esc(it.label.split(' - ')[0])}</th>`).join('')}<th>Groupe</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p style="margin:8px 0 0">${sums}</p></div>`;
 }
