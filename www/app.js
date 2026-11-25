@@ -728,6 +728,32 @@ function autoGroups(g, force, key) {
 function autoAll() { for (const g of ['recit', 'oral', 'lect', 'ecrit', 'conj']) { autoGroups(g); if (g === 'lect') autoGroups('lect', false, 'groupsComp'); } }
 const manualGrp = () => {};   // le classement reste toujours automatique
 
+/* ---------- Tableau de recensement : élève × critères → groupe (lecture seule, calculé automatiquement) ---------- */
+function recapHtml(g, key) {
+  key = key || 'groups';
+  if (g === 'conj' || !S[g] || !S[g][key]) return '';
+  autoGroups(g, false, key);
+  const arr = S[g][key], items = autoItems(g, key);
+  const weakIdx = arr.map((x, i) => (x.cons ? -1 : i)).filter(i => i >= 0), consIdx = arr.findIndex(x => x.cons);
+  const n = weakIdx.length, gi = k => weakIdx[Math.min(k, n - 1)];
+  const labels = GROUPS_4;
+  const rows = S.students.map((st, si) => {
+    const lv = items.map(it => critLv(g, st.id, it.key));
+    let grp = '', cls = '';
+    const k = items.findIndex(it => isWeak(g, st.id, it.key));
+    if (k >= 0 && n) { const i = gi(k); grp = grLabel(labels, arr[i], i); cls = 'rc-weak'; }
+    else if (k < 0 && consIdx >= 0 && items.length && items.every(it => isStrong(g, st.id, it.key))) { grp = grLabel(labels, arr[consIdx], consIdx); cls = 'rc-ok'; }
+    else if (lv.some(Boolean)) { grp = '—'; }
+    const cell = (v, it) => `<td class="${v === '---' || v === '--+' ? 'rc-weak' : (v === '-++' || v === '+++' ? 'rc-ok' : '')}" style="text-align:center">${esc(v || '')}</td>`;
+    return `<tr><td class="sticky">${esc(stuLabel(st, si))}</td>${items.map((it, j) => cell(lv[j], it)).join('')}<td class="${cls}"><b>${esc(grp)}</b></td></tr>`;
+  }).join('');
+  const sums = arr.map((gr, i) => `<span class="chip">${esc(grLabel(labels, gr, i))} : <b>${String(gr.noms || '').split(/\s*,\s*|\n/).filter(Boolean).length}</b></span>`).join(' ');
+  return `<div class="card"><h3>Tableau de recensement</h3>
+    <p class="hint">Classement automatique selon les niveaux saisis dans la grille : --- ou --+ dans un critère → groupe de ce critère (le premier critère non maîtrisé décide) ; -++ ou +++ dans tous les critères → Consolidation.</p>
+    <div class="scroll"><table><thead><tr><th class="sticky">Élève</th>${items.map(it => `<th class="lvl">${esc(it.label.split(' - ')[0])}</th>`).join('')}<th>Groupe</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p style="margin:8px 0 0">${sums}</p></div>`;
+}
+
 function stuPickModal(path) {
   const cur = new Set(splitList(getP(path), true).map(x => x.toLowerCase()));
   const rows = S.students.map((s, i) => [s, i]);
@@ -1046,7 +1072,7 @@ const SECTIONS = {
   recit: { icon: '🎭', title: 'Récitation', sub: 'Grille · mise en train', tabs: [
     ['Grille', () => `<div class="card"><div class="row2">${field('Module d’évaluation N°', 'recit|module')}<div></div></div>
       ${field('Poème 1', 'recit|poemes|P1')}${field('Poème 2', 'recit|poemes|P2')}</div>${gridHtml('recit')}`],
-    ['Mise en train', () => groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'recit')],
+    ['Mise en train', () => recapHtml('recit') + groupsHtml('recit|groups', 'Résultats de la mise en train', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'recit')],
     ['Activités de remédiation', () => remedActHtml('recit')]] },
 
   oral: { icon: '🗣️', title: 'Expression orale', sub: 'Fiche · grille', tabs: [
@@ -1058,7 +1084,7 @@ const SECTIONS = {
       ${[0, 1, 2].map(i => `<div class="card"><h3>Épreuve d’évaluation n°${i + 1}</h3>${field('Objectifs de communication + lexique et structures à employer par l’élève + questions proposées', `oral|epr|${i}`, { ta: 1, rows: 6 })}</div>`).join('')}`],
     ['Grille', () => gridHtml('oral')],
     ['Erreurs', () => errorsHtml('oral')],
-    ['Bilan', () => groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'oral')],
+    ['Bilan', () => recapHtml('oral') + groupsHtml('oral|groups', 'Résultats en expression orale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'oral')],
     ['Activités de remédiation', () => remedActHtml('oral')]] },
 
   lect: { icon: '📖', title: 'Lecture', sub: 'Grille · vocale & compréhension', tabs: [
@@ -1066,15 +1092,15 @@ const SECTIONS = {
       ${field('Titre', `lect|textes|${i}|titre`)}${field('Texte', `lect|textes|${i}|texte`, { ta: 1, rows: 7 })}</div>`).join('')],
     ['Grille', () => gridHtml('lect')],
     ['Erreurs', () => errorsHtml('lect')],
-    ['Bilans', () => groupsHtml('lect|groups', 'Résultats en lecture vocale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect') +
-      groupsHtml('lect|groupsComp', 'Résultats en lecture compréhension', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect')],
+    ['Bilans', () => recapHtml('lect') + groupsHtml('lect|groups', 'Résultats en lecture vocale', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect') +
+      recapHtml('lect', 'groupsComp') + groupsHtml('lect|groupsComp', 'Résultats en lecture compréhension', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'lect')],
     ['Activités de remédiation', () => remedActHtml('lect')],
     ['Remédiation', () => remedHtml('lect|remed', 'Dispositif de remédiation de la lecture')]] },
 
   ecrit: { icon: '✍️', title: 'Production écrite', sub: 'Grille', tabs: [
     ['Grille', () => gridHtml('ecrit')],
     ['Erreurs', () => errorsHtml('ecrit')],
-    ['Bilan', () => groupsHtml('ecrit|groups', 'Résultats à l’écrit', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'ecrit')],
+    ['Bilan', () => recapHtml('ecrit') + groupsHtml('ecrit|groups', 'Résultats à l’écrit', GROUPS_4, ['noms', 'crit', 'diff', 'dec'], 'ecrit')],
     ['Activités de remédiation', () => remedActHtml('ecrit')],
     ['Remédiation', () => remedHtml('ecrit|remed', 'Dispositif de remédiation de la production')]] },
 
