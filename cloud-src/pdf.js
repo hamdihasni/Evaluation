@@ -247,6 +247,7 @@ export async function exportPdf(model, o) {
       }
       heading(b.text, 2);
     }
+    else if (b.t === 'pb') { if (y > M + 1) newPage(); }      // page indépendante
     else if (b.t === 'kv') paragraph(b.text, b.label);
     else if (b.t === 'p') paragraph(b.text);
     else if (b.t === 'table') table(b);
