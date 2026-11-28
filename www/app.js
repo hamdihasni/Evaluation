@@ -1499,8 +1499,9 @@ function buildModel(sel) {
   const B = [], m = S.meta;
   const H1 = t => B.push({ t: 'h1', text: t, newPage: B.length > 0 });
   const H2 = t => B.push({ t: 'h2', text: t });
+  const PB = () => B.push({ t: 'pb' });   // saut de page : la rubrique suivante commence sur une page indépendante
   const KV = (label, text) => { if (String(text || '').trim()) B.push({ t: 'kv', label, text }); };
-  const ERR = g => { H2('Recensement et classification des erreurs'); if (S[g].err.length) B.push(errModel(g)); else B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); };
+  const ERR = g => { if (S[g].err.length) { PB(); H2('Recensement et classification des erreurs'); B.push(errModel(g)); PB(); } else { H2('Recensement et classification des erreurs'); B.push({ t: 'p', text: 'Aucune erreur enregistrée.' }); } };
   const G4 = ['noms', 'crit', 'diff', 'dec'];
   // activités de remédiation retenues (IA + saisies par l'enseignant), classées par groupe
   const RA_TITLE = { recit: 'Récitation', oral: 'Expression orale', lect: 'Lecture', ecrit: 'Production écrite', conj: 'Conjugaison · Grammaire · Orthographe' };
@@ -1560,7 +1561,7 @@ function buildModel(sel) {
     H1('Récitation — grille');
     UP('recit');
     KV('Module d’évaluation N°', S.recit.module); KV('Poème 1', S.recit.poemes.P1); KV('Poème 2', S.recit.poemes.P2);
-    CRIT('recit'); B.push(gridModel('recit'));
+    PB(); CRIT('recit'); B.push(gridModel('recit')); PB();
     H2('Résultats de la mise en train'); B.push(grpModel(S.recit.groups, GROUPS_4, G4));
   }
   if (sel.includes('oral')) {
@@ -1572,7 +1573,7 @@ function buildModel(sel) {
     KV('Structure', o.structure); KV('Lexique', o.lexique);
     o.sit.forEach((x, i) => KV('Situation S' + (i + 1), x));
     o.epr.forEach((x, i) => KV('Épreuve d’évaluation n°' + (i + 1), x));
-    CRIT('oral'); H2('Grille d’évaluation'); B.push(gridModel('oral'));
+    PB(); CRIT('oral'); H2('Grille d’évaluation'); B.push(gridModel('oral')); PB();
     ERR('oral');
     H2('Résultats en expression orale'); B.push(grpModel(o.groups, GROUPS_4, G4));
   }
@@ -1581,7 +1582,7 @@ function buildModel(sel) {
     H1('Lecture — grille');
     UP('lect');
     l.textes.forEach((t, i) => { if ((t.titre || t.texte || '').trim()) { KV(`Texte N°${i + 1}` + (t.titre ? ' — ' + t.titre : ''), t.texte || ' '); } });
-    CRIT('lect'); H2('Grille d’évaluation'); B.push(gridModel('lect'));
+    PB(); CRIT('lect'); H2('Grille d’évaluation'); B.push(gridModel('lect')); PB();
     ERR('lect');
     H2('Résultats en lecture vocale'); B.push(grpModel(l.groups, GROUPS_4, G4));
     H2('Résultats en lecture compréhension'); B.push(grpModel(l.groupsComp, GROUPS_4, G4));
@@ -1591,7 +1592,7 @@ function buildModel(sel) {
     const e = S.ecrit;
     H1('Production écrite — grille');
     UP('ecrit');
-    CRIT('ecrit'); B.push(gridModel('ecrit'));
+    PB(); CRIT('ecrit'); B.push(gridModel('ecrit')); PB();
     ERR('ecrit');
     H2('Résultats à l’écrit'); B.push(grpModel(e.groups, GROUPS_4, G4));
     KV('Dispositif de remédiation de la production', e.remed);
@@ -1601,11 +1602,13 @@ function buildModel(sel) {
     H1('Conjugaison · Grammaire · Orthographe');
     UP('conj');
     d.forEach(i => KV('Difficulté n°' + (i + 1), c.diffs[i]));
+    PB();
     const pct = k => { let ok = 0, tot = 0; for (const st of S.students) { const v = (c.marks[st.id] || {})[k]; if (v === 'ok') { ok++; tot++; } else if (v === 'ko') tot++; } return tot ? Math.round(100 * ok / tot) + ' %' : ''; };
     B.push({ t: 'table', align: 'center', firstW: 40, fit: true,
       head: [['Élève', ...d.map(i => 'Diff. ' + (i + 1))]],
       body: S.students.map((s, i) => [stuLabel(s, i), ...d.map(k => { const v = (c.marks[s.id] || {})['d' + k]; return v === 'ok' ? { c: 'V', lv: 1 } : v === 'ko' ? { c: 'X', lv: 1 } : ''; })]),
       foot: [['% de réussite', ...d.map(k => pct('d' + k))]] });
+    PB();
     H2('Résultats des élèves'); B.push(grpModel(c.groups, GROUPS_ABCD, ['noms', 'crit', 'dec']));
     KV('Dispositif de remédiation', c.remed);
   }
